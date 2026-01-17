@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Chat - يعمل الآن</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        input,
+        button {
+            padding: 10px;
+            margin: 5px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: #0084ff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background: #ccc;
+        }
+
+        .conversation {
+            padding: 10px;
+            border: 1px solid #eee;
+            margin: 5px 0;
+            cursor: pointer;
+        }
+
+        .conversation:hover {
+            background: #f0f0f0;
+        }
+
+        .message {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 8px;
+        }
+
+        .sent {
+            background: #d4edda;
+            text-align: left;
+        }
+
+        .received {
+            background: #f8f9fa;
+            text-align: right;
+        }
+
+        .status {
+            padding: 5px;
+            background: #e9ecef;
+            border-radius: 3px;
+        }
+
+        .unread {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h2>💬 دردشة - الإصدار العامل</h2>
+
+        <div class="section">
+            <h3>🔗 الاتصال</h3>
+            <input type="text" id="token" placeholder="التوكن"
+                value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NzIsImZpcnN0bmFtZSI6ImFsaSIsImlhdCI6MTcwOTEyMzQ1Mn0.1234567890">
+            <button onclick="connect()">اتصال</button>
+            <div id="status" class="status">غير متصل</div>
+        </div>
+
+        <div class="section">
+            <h3>📞 المحادثات</h3>
+            <button onclick="loadInbox()" id="loadBtn" disabled>تحميل المحادثات</button>
+            <div id="inbox"></div>
+        </div>
+
+        <div class="section">
+            <h3>💭 الدردشة</h3>
+            <input type="number" id="contactId" placeholder="ID المستخدم">
+            <button onclick="openChat()">فتح محادثة</button>
+            <div id="chatTitle"></div>
+            <div id="messages" style="height: 300px; overflow-y: auto;"></div>
+            <input type="text" id="messageInput" placeholder="اكتب رسالتك..." disabled>
+            <button onclick="sendMessage()" id="sendBtn" disabled>إرسال</button>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let myUserId = null;
+        let currentContactId = null;
+
+        function connect() {
+            const token = document.getElementById('token').value.trim();
+            if (!token) return alert('أدخل التوكن');
+
+            socket = io('http://localhost:3000', {
+                auth: { token }
+            });
+
+            socket.on('connect', () => {
+                document.getElementById('status').textContent = '✅ متصل';
+                document.getElementById('loadBtn').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                document.getElementById('messageInput').disabled = false;
+                loadInbox();
+            });
+
+            socket.on('connect_error', (error) => {
+                document.getElementById('status').textContent = '❌ خطأ في الاتصال';
+                console.error('Connection error:', error);
+            });
+
+            socket.on('user_info', (data) => {
+                myUserId = data.id;
+                console.log('My User ID:', myUserId);
+            });
+
+            socket.on('receive_message', (data) => {
+                if (currentContactId && (currentContactId == data.sender_id || currentContactId == data.receiver_id)) {
+                    addMessage(data);
+                }
+                loadInbox();
+            });
+
+            socket.on('message_sent', (data) => {
+                if (currentContactId && currentContactId == data.receiver_id) {
+                    addMessage(data);
+                }
+                loadInbox();
+            });
+        }
+
+        function loadInbox() {
+            const token = document.getElementById('token').value;
+
+            fetch('http://localhost:3000/api/chat/inbox', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displayInbox(data.data);
+                    } else {
+                        alert('خطأ: ' + (data.error || 'غير معروف'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading inbox:', error);
+                    alert('خطأ في تحميل المحادثات');
+                });
+        }
+
+        function displayInbox(conversations) {
+            const container = document.getElementById('inbox');
+
+            if (!conversations || conversations.length === 0) {
+                container.innerHTML = '<p>لا توجد محادثات</p>';
+                return;
+            }
+
+            let html = '';
+
+            conversations.forEach(conv => {
+                const partnerId = conv.partner_id;
+                const unreadCount = conv.unread_count || 0;
+                const lastMessage = conv.content || 'بدون رسائل';
+                const time = conv.created_at ? new Date(conv.created_at).toLocaleTimeString() : '';
+                const isSent = conv.sender_id == myUserId;
+                const isRead = conv.is_read == 1;
+                const isDelivered = conv.is_delivered == 1;
+
+                html += `
+                    <div class="conversation" onclick="selectConversation(${partnerId})">
+                        <strong>
+                            المستخدم ${partnerId}
+                            ${unreadCount > 0 ? `<span class="unread">(${unreadCount} جديد)</span>` : ''}
+                        </strong>
+                        <div>${isSent ? 'أنت: ' : ''}${lastMessage}</div>
+                        <div style="font-size: 12px; color: #666;">
+                            ${time} • 
+                            ${isSent ? (isDelivered ? (isRead ? '✓✓ مقروء' : '✓ مرسل') : '⏳ في الانتظار') : (isRead ? '✓ مقروء' : '🆕 جديد')}
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        function selectConversation(partnerId) {
+            currentContactId = partnerId;
+            document.getElementById('contactId').value = partnerId;
+            document.getElementById('chatTitle').innerHTML = `<h4>محادثة مع المستخدم ${partnerId}</h4>`;
+            loadChatHistory();
+        }
+
+        function openChat() {
+            const partnerId = document.getElementById('contactId').value;
+            if (!partnerId) return alert('أدخل ID المستخدم');
+
+            currentContactId = parseInt(partnerId);
+            document.getElementById('chatTitle').innerHTML = `<h4>محادثة مع المستخدم ${partnerId}</h4>`;
+            loadChatHistory();
+        }
+
+        function loadChatHistory() {
+            if (!currentContactId) return;
+
+            const token = document.getElementById('token').value;
+
+            fetch(`http://localhost:3000/api/chat/history/${currentContactId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displayMessages(data.data);
+                    } else {
+                        alert('خطأ: ' + (data.error || 'غير معروف'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading chat history:', error);
+                    alert('خطأ في تحميل الرسائل');
+                });
+        }
+
+        function displayMessages(messages) {
+            const container = document.getElementById('messages');
+            container.innerHTML = '';
+
+            if (!messages || messages.length === 0) {
+                container.innerHTML = '<p>لا توجد رسائل</p>';
+                return;
+            }
+
+            messages.forEach(msg => {
+                addMessage(msg);
+            });
+        }
+
+        function addMessage(msg) {
+            const container = document.getElementById('messages');
+            const isSent = msg.sender_id == myUserId;
+
+            const div = document.createElement('div');
+            div.className = `message ${isSent ? 'sent' : 'received'}`;
+
+            const time = msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : '';
+
+            div.innerHTML = `
+                <div><strong>${isSent ? 'أنت' : 'المستخدم ' + msg.sender_id}:</strong> ${msg.content}</div>
+                <div style="font-size: 12px; color: #666;">
+                    ${time} • ${msg.status_display || ''}
+                </div>
+            `;
+
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function sendMessage() {
+            if (!socket || !socket.connected) {
+                alert('غير متصل');
+                return;
+            }
+
+            if (!currentContactId) {
+                alert('اختر محادثة أولاً');
+                return;
+            }
+
+            const input = document.getElementById('messageInput');
+            const content = input.value.trim();
+
+            if (!content) return;
+
+            socket.emit('send_message', {
+                receiver_id: parseInt(currentContactId),
+                content: content
+            });
+
+            input.value = '';
+        }
+
+        // السماح بإرسال الرسالة بالضغط على Enter
+        document.getElementById('messageInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        document.getElementById('contactId').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                openChat();
+            }
+        });
+    </script>
+</body>
+
+</html>
