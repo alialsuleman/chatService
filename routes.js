@@ -140,7 +140,6 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
         res.status(500).json(formatResponse(false, 'Failed to retrieve chat history', null, [err.message], 500));
     }
 });
-
 router.get('/inbox', authMiddleware, async (req, res) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -183,6 +182,8 @@ router.get('/inbox', authMiddleware, async (req, res) => {
 
             return {
                 ...conv,
+                // إضافة حقل isMine للتحقق مما إذا كانت آخر رسالة من المستخدم الحالي
+                isMine: conv.sender_id === myId,
                 // إذا كان userData موجوداً، نعرض البيانات، وإلا نضع كائن "مستخدم غير معروف"
                 partner_info: userData ? {
                     id: userData.id,
@@ -224,8 +225,6 @@ router.get('/inbox', authMiddleware, async (req, res) => {
         res.status(500).json(formatResponse(false, 'Failed to retrieve inbox', null, [err.message], 500));
     }
 });
-
-
 // 3. البحث في جهات الاتصال السابقة (المستخدمين الذين تواصلت معهم)
 router.get('/search-contacts', authMiddleware, async (req, res) => {
     const authHeader = req.headers['authorization'];

@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Chat Test - Production Mode</title>
+    <title>نظام الدردشة المتقدم</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         body {
@@ -14,7 +14,7 @@
         }
 
         .container {
-            max-width: 900px;
+            max-width: 1200px;
             margin: auto;
             background: white;
             padding: 25px;
@@ -30,13 +30,16 @@
         }
 
         input,
-        button {
+        button,
+        select,
+        textarea {
             padding: 12px;
             margin: 5px 0;
             width: 100%;
             box-sizing: border-box;
             border-radius: 8px;
             border: 1px solid #ddd;
+            font-family: inherit;
         }
 
         button {
@@ -54,6 +57,23 @@
 
         button:disabled {
             background: #ccc;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: #42b72a;
+        }
+
+        button.secondary:hover {
+            background: #36a420;
+        }
+
+        button.danger {
+            background: #ff3b30;
+        }
+
+        button.danger:hover {
+            background: #dc3545;
         }
 
         .user-card {
@@ -88,7 +108,7 @@
             padding: 2px 8px;
             border-radius: 10px;
             font-size: 12px;
-            float: left;
+            font-weight: bold;
         }
 
         #messages {
@@ -108,6 +128,7 @@
             border-radius: 18px;
             font-size: 14px;
             position: relative;
+            word-wrap: break-word;
         }
 
         .sent {
@@ -136,35 +157,197 @@
             color: #42b72a;
             font-weight: bold;
         }
+
+        .status-offline {
+            color: #ff3b30;
+            font-weight: bold;
+        }
+
+        .search-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .search-results {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+
+        .search-result-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .search-result-item:hover {
+            background: #e3f2fd;
+        }
+
+        .search-result-item.selected {
+            background: #bbdefb;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .pagination button {
+            width: auto;
+            padding: 8px 15px;
+        }
+
+        .message-status {
+            font-size: 11px;
+            margin-top: 3px;
+            opacity: 0.8;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .error-message {
+            color: #ff3b30;
+            padding: 10px;
+            border: 1px solid #ff3b30;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        .success-message {
+            color: #42b72a;
+            padding: 10px;
+            border: 1px solid #42b72a;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        .quick-chat {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .flex-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .flex-row input {
+            flex: 1;
+        }
+
+        .flex-row button {
+            width: auto;
+            white-space: nowrap;
+        }
+
+        .user-details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .debug-info {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
     </style>
 </head>
 
 <body>
     <div class="container">
-        <h2>🚀 نظام الدردشة - التجربة الحية</h2>
+        <h2>🚀 نظام الدردشة المتقدم</h2>
 
         <div class="section">
             <h3>🔗 إعدادات الاتصال</h3>
-            <input type="text" id="token" placeholder="أدخل توكن JWT هنا...">
+            <input type="text" id="token" placeholder="أدخل توكن JWT هنا..."
+                value="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL3Nydjk4OTExNy5oc3Rnci5jbG91ZC9hdXRoL2xvZ2luIiwiaWF0IjoxNzQwNDY0MDUyLCJleHAiOjE3NDA0Njc2NTIsIm5iZiI6MTc0MDQ2NDA1MiwianRpIjoiRzZaQkZTNUhTbFZ1dkJZdyIsInN1YiI6IjU2MCIsInBydiI6IjIzYmQ1Yzg5NDlmNjAwYWRiMzllNzAxYzQwMDg3MmRiN2E1OTc2ZjcifQ.uhPA-vp99Qw0tKqU9Ngn7CJtNGL3eLRV63hRqR3-lEU">
             <button onclick="connect()">تسجيل الدخول والاتصال</button>
+            <button onclick="disconnect()" class="danger" style="margin-top: 10px;">قطع الاتصال</button>
             <div id="status" class="status">الحالة: <span id="statusText" style="color: grey;">غير متصل</span></div>
+            <div id="userId" style="margin-top: 10px; font-size: 14px; color: #666;"></div>
+
+            <!-- زر لعرض معلومات التصحيح -->
+            <button onclick="toggleDebug()" style="background: #6c757d; margin-top: 10px;">🔧 عرض معلومات
+                التصحيح</button>
+            <div id="debugInfo" class="debug-info"></div>
+        </div>
+
+        <!-- قسم البحث عن المستخدمين وإرسال رسالة سريعة -->
+        <div class="quick-chat" id="quickChatSection" style="display: none;">
+            <h3>🔍 بحث وإرسال رسالة سريعة</h3>
+            <div class="flex-row">
+                <input type="number" id="directUserId" placeholder="أدخل ID المستخدم مباشرة...">
+                <button onclick="startDirectChat()" class="secondary">بدء محادثة</button>
+            </div>
+
+            <div style="margin-top: 15px;">
+                <h4>🔎 بحث في جهات الاتصال</h4>
+                <div class="flex-row">
+                    <input type="text" id="searchInput" placeholder="ابحث باسم المستخدم...">
+                    <button onclick="searchContacts()" class="secondary">بحث</button>
+                </div>
+                <div style="display: flex; gap: 5px; margin-top: 5px; flex-wrap: wrap;">
+                    <button onclick="searchContacts('full')" style="background: #0084ff; flex: 1;">بحث كامل</button>
+                    <button onclick="searchContacts('simple')" style="background: #6c757d; flex: 1;">بحث مبسط</button>
+                    <select id="searchLimit" style="width: 100px;">
+                        <option value="5">5</option>
+                        <option value="10" selected>10</option>
+                        <option value="20">20</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="searchResults" class="search-results" style="display: none;"></div>
+            <div id="searchPagination" class="pagination" style="display: none;"></div>
         </div>
 
         <div style="display: flex; gap: 20px;">
             <div class="section" style="flex: 1;">
                 <h3>📂 المحادثات الأخيرة</h3>
+                <button onclick="loadInbox()" style="margin-bottom: 10px;">🔄 تحديث</button>
                 <div id="inbox"></div>
+                <div id="inboxPagination" class="pagination" style="display: none;"></div>
             </div>
 
             <div class="section" style="flex: 2;">
                 <div id="chatHeader" style="display: none; align-items: center; margin-bottom: 15px;">
                     <img id="currentChatImg" class="avatar" src="">
-                    <h4 id="currentChatName" style="margin: 0;"></h4>
+                    <div style="flex-grow: 1;">
+                        <h4 id="currentChatName" style="margin: 0;"></h4>
+                        <div id="currentChatId" style="font-size: 12px; color: #666;"></div>
+                    </div>
                 </div>
                 <div id="messages"></div>
                 <div style="display: flex; gap: 5px;">
                     <input type="text" id="messageInput" placeholder="اكتب رسالتك..." disabled>
                     <button onclick="sendMessage()" id="sendBtn" style="width: 80px;" disabled>إرسال</button>
+                </div>
+                <div style="margin-top: 10px; font-size: 12px; color: #666; text-align: center;">
+                    اضغط Enter للإرسال
                 </div>
             </div>
         </div>
@@ -175,92 +358,210 @@
         let socket = null;
         let myUserId = null;
         let currentContactId = null;
+        let currentPage = 1;
+        let searchPage = 1;
+        let inboxPage = 1;
+
+        // دالة للتصحيح
+        function logDebug(message, data = null) {
+            const debugDiv = document.getElementById('debugInfo');
+            const time = new Date().toLocaleTimeString();
+            const logLine = `[${time}] ${message} ${data ? JSON.stringify(data, null, 2) : ''}`;
+            debugDiv.innerHTML += logLine + '\n---\n';
+            console.log(message, data);
+        }
+
+        function toggleDebug() {
+            const debugDiv = document.getElementById('debugInfo');
+            debugDiv.style.display = debugDiv.style.display === 'none' ? 'block' : 'none';
+        }
 
         function connect() {
             const token = document.getElementById('token').value.trim();
             if (!token) return alert('يرجى إدخال التوكن أولاً');
 
-            // الاتصال بـ Socket.io عبر النفق المؤمن HTTPS
+            logDebug('محاولة الاتصال...');
+
+            // قطع أي اتصال سابق
+            if (socket) {
+                socket.disconnect();
+            }
+
+            // الاتصال بـ Socket.io
             socket = io(BASE_URL, {
                 auth: { token },
-                path: '/socket.io/' // التأكد من مطابقة مسار Nginx
+                path: '/socket.io/',
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 5
             });
 
             socket.on('connect', () => {
                 document.getElementById('statusText').innerHTML = '<span class="status-online">متصل الآن ✅</span>';
                 document.getElementById('sendBtn').disabled = false;
                 document.getElementById('messageInput').disabled = false;
+                document.getElementById('quickChatSection').style.display = 'block';
+                logDebug('✅ تم الاتصال بنجاح');
                 loadInbox();
             });
 
-            socket.on('user_info', (data) => { myUserId = data.id; });
+            socket.on('user_info', (data) => {
+                myUserId = data.id;
+                document.getElementById('userId').innerHTML = `معرفك: <strong>${myUserId}</strong> (${data.name})`;
+                logDebug('معلومات المستخدم:', data);
+            });
 
             socket.on('receive_message', (data) => {
-                if (currentContactId == data.sender_id) addMessage(data);
-                loadInbox();
+                if (currentContactId == data.sender_id) {
+                    addMessage(data);
+                }
+                loadInbox(); // تحديث صندوق الوارد
+                showNotification('رسالة جديدة', data.content);
+                logDebug('رسالة واردة:', data);
             });
 
             socket.on('message_sent', (data) => {
-                if (currentContactId == data.receiver_id) addMessage(data);
+                if (currentContactId == data.receiver_id) {
+                    addMessage(data);
+                }
+                if (data.pending) {
+                    console.log('الرسالة في الانتظار:', data.note);
+                }
                 loadInbox();
+                logDebug('تم إرسال الرسالة:', data);
+            });
+
+            socket.on('pending_delivered', (data) => {
+                console.log(`تم تسليم ${data.count} رسالة معلقة`);
+                logDebug('تم تسليم الرسائل المعلقة:', data);
             });
 
             socket.on('connect_error', (err) => {
-                document.getElementById('statusText').innerText = '❌ فشل الاتصال: ' + err.message;
+                document.getElementById('statusText').innerHTML = `<span class="status-offline">❌ فشل الاتصال: ${err.message}</span>`;
+                logDebug('❌ خطأ في الاتصال:', err.message);
+            });
+
+            socket.on('error', (data) => {
+                alert('خطأ: ' + data.message);
+                logDebug('خطأ من السيرفر:', data);
+            });
+
+            socket.on('disconnect', (reason) => {
+                document.getElementById('statusText').innerHTML = '<span class="status-offline">غير متصل ❌</span>';
+                document.getElementById('sendBtn').disabled = true;
+                document.getElementById('messageInput').disabled = true;
+                logDebug('تم قطع الاتصال:', reason);
             });
         }
 
-        function loadInbox() {
+        function disconnect() {
+            if (socket) {
+                socket.disconnect();
+            }
+        }
+
+        function loadInbox(page = 1) {
+            inboxPage = page;
             const token = document.getElementById('token').value;
-            fetch(`${BASE_URL}/chat/api/chat/inbox`, {
+            const url = `${BASE_URL}/chat/api/chat/inbox?page=${page}`;
+
+            logDebug('تحميل صندوق الوارد:', url);
+
+            fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             })
                 .then(res => res.json())
                 .then(res => {
-                    console.log(res);
-                    if (res.success) displayInbox(res.data);
+                    logDebug('نتيجة صندوق الوارد:', res);
+                    if (res.success) {
+                        displayInbox(res.data.data, res.data.meta);
+                    } else {
+                        document.getElementById('inbox').innerHTML = `<div class="error-message">${res.message}</div>`;
+                    }
+                })
+                .catch(err => {
+                    logDebug('خطأ في تحميل صندوق الوارد:', err);
+                    document.getElementById('inbox').innerHTML = `<div class="error-message">خطأ في التحميل: ${err.message}</div>`;
                 });
         }
 
-        function displayInbox(conversations) {
+        function displayInbox(conversations, meta) {
             const container = document.getElementById('inbox');
+
+            if (!conversations || conversations.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">لا توجد محادثات</div>';
+                return;
+            }
+
             container.innerHTML = conversations.map(conv => {
                 const info = conv.partner_info || { firstname: 'مستخدم', lastname: conv.partner_id };
-                const img = info.imagePath || 'https://ui-avatars.com/api/?name=' + info.firstname;
+                const fullname = `${info.firstname || ''} ${info.lastname || ''}`.trim() || 'مستخدم غير معروف';
+                const img = info.imagePath || `https://ui-avatars.com/api/?name=${encodeURIComponent(fullname)}&background=random`;
+                const lastMessage = conv.content || 'لا توجد رسائل';
+                const time = conv.created_at ? new Date(conv.created_at).toLocaleString('ar-EG') : '';
 
                 return `
-                    <div class="user-card" onclick="openChat(${conv.partner_id}, '${info.firstname} ${info.lastname}', '${img}')">
-                        <img src="${img}" class="avatar">
+                    <div class="user-card" onclick="openChat(${conv.partner_id}, '${fullname.replace(/'/g, "\\'")}', '${img}')">
+                        <img src="${img}" class="avatar" onerror="this.src='https://ui-avatars.com/api/?name=User&background=random'">
                         <div class="user-info">
-                            <strong>${info.firstname} ${info.lastname}</strong>
-                            <div style="font-size: 12px; color: #666;">${conv.content || ''}</div>
+                            <strong>${fullname}</strong>
+                            <div style="font-size: 12px; color: #666; margin-top: 5px;">${lastMessage.substring(0, 30)}${lastMessage.length > 30 ? '...' : ''}</div>
+                            <div style="font-size: 10px; color: #999; margin-top: 3px;">${time}</div>
                         </div>
                         ${conv.unread_count > 0 ? `<span class="unread-badge">${conv.unread_count}</span>` : ''}
                     </div>
                 `;
             }).join('');
+
+            // عرض pagination
+            if (meta && meta.total_pages > 1) {
+                const paginationDiv = document.getElementById('inboxPagination');
+                paginationDiv.style.display = 'flex';
+                paginationDiv.innerHTML = `
+                    <button onclick="loadInbox(${meta.current_page - 1})" ${meta.current_page <= 1 ? 'disabled' : ''}>السابق</button>
+                    <span style="padding: 8px;">صفحة ${meta.current_page} من ${meta.total_pages}</span>
+                    <button onclick="loadInbox(${meta.current_page + 1})" ${meta.current_page >= meta.total_pages ? 'disabled' : ''}>التالي</button>
+                `;
+            } else {
+                document.getElementById('inboxPagination').style.display = 'none';
+            }
         }
 
         function openChat(partnerId, name, img) {
             currentContactId = partnerId;
             document.getElementById('chatHeader').style.display = 'flex';
             document.getElementById('currentChatName').innerText = name;
+            document.getElementById('currentChatId').innerHTML = `المعرف: ${partnerId}`;
             document.getElementById('currentChatImg').src = img;
+            document.getElementById('messageInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
             loadChatHistory();
+            logDebug('فتح محادثة:', { partnerId, name });
         }
 
         function loadChatHistory() {
             const token = document.getElementById('token').value;
-            fetch(`${BASE_URL}/chat/api/chat/history/${currentContactId}`, {
+            const url = `${BASE_URL}/chat/api/chat/history/${currentContactId}`;
+
+            logDebug('تحميل سجل المحادثة:', url);
+
+            fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             })
                 .then(res => res.json())
                 .then(res => {
+                    logDebug('نتيجة سجل المحادثة:', res);
                     if (res.success) {
                         const msgDiv = document.getElementById('messages');
                         msgDiv.innerHTML = '';
-                        res.data.forEach(addMessage);
+                        res.data.data.forEach(addMessage);
+                    } else {
+                        document.getElementById('messages').innerHTML = `<div class="error-message">${res.message}</div>`;
                     }
+                })
+                .catch(err => {
+                    logDebug('خطأ في تحميل سجل المحادثة:', err);
+                    document.getElementById('messages').innerHTML = `<div class="error-message">خطأ في التحميل: ${err.message}</div>`;
                 });
         }
 
@@ -270,9 +571,12 @@
             const div = document.createElement('div');
             div.className = `message ${isSent ? 'sent' : 'received'}`;
 
+            const time = new Date(msg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+            const status = msg.status_display || (msg.is_read ? 'مقروءة' : msg.is_delivered ? 'تم التسليم' : 'جاري الإرسال...');
+
             div.innerHTML = `
                 ${msg.content}
-                <span class="msg-time">${new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • ${msg.status_display || ''}</span>
+                <span class="msg-time">${time} • ${status}</span>
             `;
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
@@ -290,8 +594,213 @@
             input.value = '';
         }
 
+        // البحث في جهات الاتصال
+        function searchContacts(mode = 'full') {
+            const token = document.getElementById('token').value;
+            const searchTerm = document.getElementById('searchInput').value.trim();
+            const limit = document.getElementById('searchLimit').value;
+
+            if (!searchTerm) {
+                alert('الرجاء إدخال مصطلح البحث');
+                return;
+            }
+
+            searchPage = 1;
+            performSearch(mode, searchTerm, limit, searchPage);
+        }
+
+        function performSearch(mode, searchTerm, limit, page) {
+            const token = document.getElementById('token').value;
+
+            // المسار الصحيح من الكود الخلفي
+            let endpoint;
+            if (mode === 'simple') {
+                endpoint = '/chat/api/chat/search-contacts/simple';
+            } else {
+                endpoint = '/chat/api/chat/search-contacts';
+            }
+
+            const url = `${BASE_URL}${endpoint}?q=${encodeURIComponent(searchTerm)}&page=${page}&limit=${limit}`;
+
+            logDebug('محاولة بحث:', { url, mode, searchTerm, page, limit });
+
+            // إظهار رسالة تحميل
+            const resultsDiv = document.getElementById('searchResults');
+            resultsDiv.style.display = 'block';
+            resultsDiv.innerHTML = '<div class="loading">جاري البحث...</div>';
+
+            fetch(url, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+                .then(res => {
+                    logDebug('استجابة البحث (status):', res.status);
+                    return res.json();
+                })
+                .then(res => {
+                    logDebug('نتيجة البحث:', res);
+
+                    if (res.success) {
+                        if (mode === 'simple') {
+                            displaySimpleSearchResults(res.data.data || res.data);
+                        } else {
+                            displayFullSearchResults(res.data.data, res.data.meta);
+                        }
+                    } else {
+                        resultsDiv.innerHTML = `<div class="error-message">${res.message || 'فشل البحث'}</div>`;
+                    }
+                })
+                .catch(err => {
+                    logDebug('خطأ في البحث:', err);
+                    resultsDiv.innerHTML = `<div class="error-message">خطأ في البحث: ${err.message}</div>`;
+                });
+        }
+
+        function displaySimpleSearchResults(data) {
+            const resultsDiv = document.getElementById('searchResults');
+            const paginationDiv = document.getElementById('searchPagination');
+
+            paginationDiv.style.display = 'none';
+
+            if (!data || data.length === 0) {
+                resultsDiv.innerHTML = '<div style="padding: 20px; text-align: center;">لا توجد نتائج</div>';
+                return;
+            }
+
+            resultsDiv.innerHTML = data.map(user => {
+                const fullname = user.fullname || `${user.firstname || ''} ${user.lastname || ''}`.trim() || 'مستخدم غير معروف';
+                return `
+                    <div class="search-result-item" onclick="selectUser(${user.id}, '${fullname.replace(/'/g, "\\'")}', '${user.imagePath || ''}')">
+                        <img src="${user.imagePath || `https://ui-avatars.com/api/?name=${encodeURIComponent(fullname)}&background=random`}" class="avatar" style="width: 40px; height: 40px;" onerror="this.src='https://ui-avatars.com/api/?name=User&background=random'">
+                        <div>
+                            <strong>${fullname}</strong>
+                            <div class="user-details">المعرف: ${user.id}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function displayFullSearchResults(data, meta) {
+            const resultsDiv = document.getElementById('searchResults');
+
+            if (!data || data.length === 0) {
+                resultsDiv.innerHTML = '<div style="padding: 20px; text-align: center;">لا توجد نتائج</div>';
+                return;
+            }
+
+            resultsDiv.innerHTML = data.map(item => {
+                const contact = item.contact_info || {};
+                const fullname = contact.fullname || `${contact.firstname || ''} ${contact.lastname || ''}`.trim() || 'مستخدم غير معروف';
+                const lastMessage = item.last_message ? item.last_message.content : '';
+
+                return `
+                    <div class="search-result-item" onclick="openChat(${contact.id}, '${fullname.replace(/'/g, "\\'")}', '${contact.imagePath || ''}')">
+                        <img src="${contact.imagePath || `https://ui-avatars.com/api/?name=${encodeURIComponent(fullname)}&background=random`}" class="avatar" style="width: 40px; height: 40px;" onerror="this.src='https://ui-avatars.com/api/?name=User&background=random'">
+                        <div style="flex-grow: 1;">
+                            <strong>${fullname}</strong>
+                            <div class="user-details">
+                                المعرف: ${contact.id} | 
+                                ${item.unread_count > 0 ? `<span style="color: #ff3b30;">${item.unread_count} غير مقروءة</span>` : ''}
+                            </div>
+                            ${lastMessage ? `
+                                <div style="font-size: 11px; color: #666; margin-top: 5px;">
+                                    آخر رسالة: ${lastMessage.substring(0, 30)}${lastMessage.length > 30 ? '...' : ''}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // عرض pagination
+            if (meta && meta.total_pages > 1) {
+                const paginationDiv = document.getElementById('searchPagination');
+                paginationDiv.style.display = 'flex';
+                paginationDiv.innerHTML = `
+                    <button onclick="changeSearchPage(${meta.current_page - 1})" ${meta.current_page <= 1 ? 'disabled' : ''}>السابق</button>
+                    <span style="padding: 8px;">صفحة ${meta.current_page} من ${meta.total_pages}</span>
+                    <button onclick="changeSearchPage(${meta.current_page + 1})" ${meta.current_page >= meta.total_pages ? 'disabled' : ''}>التالي</button>
+                `;
+            } else {
+                document.getElementById('searchPagination').style.display = 'none';
+            }
+        }
+
+        function changeSearchPage(newPage) {
+            searchPage = newPage;
+            const searchTerm = document.getElementById('searchInput').value.trim();
+            const limit = document.getElementById('searchLimit').value;
+            performSearch('full', searchTerm, limit, searchPage);
+        }
+
+        function selectUser(userId, name, img) {
+            if (confirm(`هل تريد فتح محادثة مع ${name}؟`)) {
+                openChat(userId, name, img);
+            }
+        }
+
+        // إرسال رسالة مباشرة لشخص عن طريق ID
+        function startDirectChat() {
+            const userId = document.getElementById('directUserId').value.trim();
+            if (!userId) {
+                alert('الرجاء إدخال ID المستخدم');
+                return;
+            }
+
+            // التحقق من صحة الرقم
+            if (isNaN(userId) || userId <= 0) {
+                alert('الرجاء إدخال ID صحيح');
+                return;
+            }
+
+            // محاولة فتح المحادثة مباشرة مع ID المستخدم
+            openChat(parseInt(userId), `مستخدم ${userId}`, `https://ui-avatars.com/api/?name=User+${userId}&background=random`);
+
+            // مسح الحقل
+            document.getElementById('directUserId').value = '';
+        }
+
         // إرسال عبر Enter
-        document.getElementById('messageInput').onkeypress = (e) => { if (e.key === 'Enter') sendMessage(); };
+        document.getElementById('messageInput').onkeypress = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendMessage();
+            }
+        };
+
+        // إرسال البحث عبر Enter
+        document.getElementById('searchInput').onkeypress = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                searchContacts();
+            }
+        };
+
+        // إرسال ID مباشر عبر Enter
+        document.getElementById('directUserId').onkeypress = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                startDirectChat();
+            }
+        };
+
+        // إظهار إشعارات بسيطة
+        function showNotification(title, body) {
+            if (Notification.permission === 'granted') {
+                new Notification(title, { body });
+            } else if (Notification.permission !== 'denied') {
+                Notification.requestPermission().then(permission => {
+                    if (permission === 'granted') {
+                        new Notification(title, { body });
+                    }
+                });
+            }
+        }
+
+        // طلب إذن الإشعارات عند تحميل الصفحة
+        if ('Notification' in window) {
+            Notification.requestPermission();
+        }
     </script>
 </body>
 
