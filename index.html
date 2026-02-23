@@ -3,84 +3,137 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Chat - يعمل الآن</title>
+    <title>Chat Test - Production Mode</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         body {
-            font-family: Arial;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 20px;
-            background: #f5f5f5;
+            background: #f0f2f5;
+            color: #1c1e21;
         }
 
         .container {
-            max-width: 800px;
+            max-width: 900px;
             margin: auto;
             background: white;
-            padding: 20px;
-            border-radius: 10px;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
         }
 
         .section {
             margin: 20px 0;
             padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
+            border: 1px solid #e5e5e5;
+            border-radius: 10px;
         }
 
         input,
         button {
-            padding: 10px;
-            margin: 5px;
+            padding: 12px;
+            margin: 5px 0;
             width: 100%;
             box-sizing: border-box;
+            border-radius: 8px;
+            border: 1px solid #ddd;
         }
 
         button {
             background: #0084ff;
             color: white;
             border: none;
+            font-weight: bold;
             cursor: pointer;
+            transition: 0.3s;
+        }
+
+        button:hover {
+            background: #0073e6;
         }
 
         button:disabled {
             background: #ccc;
         }
 
-        .conversation {
-            padding: 10px;
-            border: 1px solid #eee;
-            margin: 5px 0;
+        .user-card {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid #eee;
             cursor: pointer;
+            transition: 0.2s;
         }
 
-        .conversation:hover {
-            background: #f0f0f0;
+        .user-card:hover {
+            background: #f7f8fa;
+        }
+
+        .avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: #ddd;
+            margin-left: 15px;
+            object-fit: cover;
+        }
+
+        .user-info {
+            flex-grow: 1;
+        }
+
+        .unread-badge {
+            background: #ff3b30;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            float: left;
+        }
+
+        #messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #eee;
+            padding: 15px;
+            background: #fff;
+            display: flex;
+            flex-direction: column;
         }
 
         .message {
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 8px;
+            max-width: 70%;
+            padding: 10px 15px;
+            margin: 5px 0;
+            border-radius: 18px;
+            font-size: 14px;
+            position: relative;
         }
 
         .sent {
-            background: #d4edda;
-            text-align: left;
+            align-self: flex-start;
+            background: #0084ff;
+            color: white;
+            border-bottom-left-radius: 2px;
         }
 
         .received {
-            background: #f8f9fa;
+            align-self: flex-end;
+            background: #e4e6eb;
+            color: black;
+            border-bottom-right-radius: 2px;
             text-align: right;
         }
 
-        .status {
-            padding: 5px;
-            background: #e9ecef;
-            border-radius: 3px;
+        .msg-time {
+            font-size: 10px;
+            opacity: 0.7;
+            margin-top: 5px;
+            display: block;
         }
 
-        .unread {
-            color: red;
+        .status-online {
+            color: #42b72a;
             font-weight: bold;
         }
     </style>
@@ -88,244 +141,157 @@
 
 <body>
     <div class="container">
-        <h2>💬 دردشة - الإصدار العامل</h2>
+        <h2>🚀 نظام الدردشة - التجربة الحية</h2>
 
         <div class="section">
-            <h3>🔗 الاتصال</h3>
-            <input type="text" id="token" placeholder="التوكن"
-                value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NzIsImZpcnN0bmFtZSI6ImFsaSIsImlhdCI6MTcwOTEyMzQ1Mn0.1234567890">
-            <button onclick="connect()">اتصال</button>
-            <div id="status" class="status">غير متصل</div>
+            <h3>🔗 إعدادات الاتصال</h3>
+            <input type="text" id="token" placeholder="أدخل توكن JWT هنا...">
+            <button onclick="connect()">تسجيل الدخول والاتصال</button>
+            <div id="status" class="status">الحالة: <span id="statusText" style="color: grey;">غير متصل</span></div>
         </div>
 
-        <div class="section">
-            <h3>📞 المحادثات</h3>
-            <button onclick="loadInbox()" id="loadBtn" disabled>تحميل المحادثات</button>
-            <div id="inbox"></div>
-        </div>
+        <div style="display: flex; gap: 20px;">
+            <div class="section" style="flex: 1;">
+                <h3>📂 المحادثات الأخيرة</h3>
+                <div id="inbox"></div>
+            </div>
 
-        <div class="section">
-            <h3>💭 الدردشة</h3>
-            <input type="number" id="contactId" placeholder="ID المستخدم">
-            <button onclick="openChat()">فتح محادثة</button>
-            <div id="chatTitle"></div>
-            <div id="messages" style="height: 300px; overflow-y: auto;"></div>
-            <input type="text" id="messageInput" placeholder="اكتب رسالتك..." disabled>
-            <button onclick="sendMessage()" id="sendBtn" disabled>إرسال</button>
+            <div class="section" style="flex: 2;">
+                <div id="chatHeader" style="display: none; align-items: center; margin-bottom: 15px;">
+                    <img id="currentChatImg" class="avatar" src="">
+                    <h4 id="currentChatName" style="margin: 0;"></h4>
+                </div>
+                <div id="messages"></div>
+                <div style="display: flex; gap: 5px;">
+                    <input type="text" id="messageInput" placeholder="اكتب رسالتك..." disabled>
+                    <button onclick="sendMessage()" id="sendBtn" style="width: 80px;" disabled>إرسال</button>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
+        const BASE_URL = 'https://srv989117.hstgr.cloud';
         let socket = null;
         let myUserId = null;
         let currentContactId = null;
 
         function connect() {
             const token = document.getElementById('token').value.trim();
-            if (!token) return alert('أدخل التوكن');
+            if (!token) return alert('يرجى إدخال التوكن أولاً');
 
-            socket = io('http://localhost:3000', {
-                auth: { token }
+            // الاتصال بـ Socket.io عبر النفق المؤمن HTTPS
+            socket = io(BASE_URL, {
+                auth: { token },
+                path: '/socket.io/' // التأكد من مطابقة مسار Nginx
             });
 
             socket.on('connect', () => {
-                document.getElementById('status').textContent = '✅ متصل';
-                document.getElementById('loadBtn').disabled = false;
+                document.getElementById('statusText').innerHTML = '<span class="status-online">متصل الآن ✅</span>';
                 document.getElementById('sendBtn').disabled = false;
                 document.getElementById('messageInput').disabled = false;
                 loadInbox();
             });
 
-            socket.on('connect_error', (error) => {
-                document.getElementById('status').textContent = '❌ خطأ في الاتصال';
-                console.error('Connection error:', error);
-            });
-
-            socket.on('user_info', (data) => {
-                myUserId = data.id;
-                console.log('My User ID:', myUserId);
-            });
+            socket.on('user_info', (data) => { myUserId = data.id; });
 
             socket.on('receive_message', (data) => {
-                if (currentContactId && (currentContactId == data.sender_id || currentContactId == data.receiver_id)) {
-                    addMessage(data);
-                }
+                if (currentContactId == data.sender_id) addMessage(data);
                 loadInbox();
             });
 
             socket.on('message_sent', (data) => {
-                if (currentContactId && currentContactId == data.receiver_id) {
-                    addMessage(data);
-                }
+                if (currentContactId == data.receiver_id) addMessage(data);
                 loadInbox();
+            });
+
+            socket.on('connect_error', (err) => {
+                document.getElementById('statusText').innerText = '❌ فشل الاتصال: ' + err.message;
             });
         }
 
         function loadInbox() {
             const token = document.getElementById('token').value;
-
-            fetch('http://localhost:3000/api/chat/inbox', {
+            fetch(`${BASE_URL}/chat/api/chat/inbox`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        displayInbox(data.data);
-                    } else {
-                        alert('خطأ: ' + (data.error || 'غير معروف'));
-                    }
-                })
-                .catch(error => {
-                    console.error('Error loading inbox:', error);
-                    alert('خطأ في تحميل المحادثات');
+                .then(res => res.json())
+                .then(res => {
+                    console.log(res);
+                    if (res.success) displayInbox(res.data);
                 });
         }
 
         function displayInbox(conversations) {
             const container = document.getElementById('inbox');
+            container.innerHTML = conversations.map(conv => {
+                const info = conv.partner_info || { firstname: 'مستخدم', lastname: conv.partner_id };
+                const img = info.imagePath || 'https://ui-avatars.com/api/?name=' + info.firstname;
 
-            if (!conversations || conversations.length === 0) {
-                container.innerHTML = '<p>لا توجد محادثات</p>';
-                return;
-            }
-
-            let html = '';
-
-            conversations.forEach(conv => {
-                const partnerId = conv.partner_id;
-                const unreadCount = conv.unread_count || 0;
-                const lastMessage = conv.content || 'بدون رسائل';
-                const time = conv.created_at ? new Date(conv.created_at).toLocaleTimeString() : '';
-                const isSent = conv.sender_id == myUserId;
-                const isRead = conv.is_read == 1;
-                const isDelivered = conv.is_delivered == 1;
-
-                html += `
-                    <div class="conversation" onclick="selectConversation(${partnerId})">
-                        <strong>
-                            المستخدم ${partnerId}
-                            ${unreadCount > 0 ? `<span class="unread">(${unreadCount} جديد)</span>` : ''}
-                        </strong>
-                        <div>${isSent ? 'أنت: ' : ''}${lastMessage}</div>
-                        <div style="font-size: 12px; color: #666;">
-                            ${time} • 
-                            ${isSent ? (isDelivered ? (isRead ? '✓✓ مقروء' : '✓ مرسل') : '⏳ في الانتظار') : (isRead ? '✓ مقروء' : '🆕 جديد')}
+                return `
+                    <div class="user-card" onclick="openChat(${conv.partner_id}, '${info.firstname} ${info.lastname}', '${img}')">
+                        <img src="${img}" class="avatar">
+                        <div class="user-info">
+                            <strong>${info.firstname} ${info.lastname}</strong>
+                            <div style="font-size: 12px; color: #666;">${conv.content || ''}</div>
                         </div>
+                        ${conv.unread_count > 0 ? `<span class="unread-badge">${conv.unread_count}</span>` : ''}
                     </div>
                 `;
-            });
-
-            container.innerHTML = html;
+            }).join('');
         }
 
-        function selectConversation(partnerId) {
+        function openChat(partnerId, name, img) {
             currentContactId = partnerId;
-            document.getElementById('contactId').value = partnerId;
-            document.getElementById('chatTitle').innerHTML = `<h4>محادثة مع المستخدم ${partnerId}</h4>`;
-            loadChatHistory();
-        }
-
-        function openChat() {
-            const partnerId = document.getElementById('contactId').value;
-            if (!partnerId) return alert('أدخل ID المستخدم');
-
-            currentContactId = parseInt(partnerId);
-            document.getElementById('chatTitle').innerHTML = `<h4>محادثة مع المستخدم ${partnerId}</h4>`;
+            document.getElementById('chatHeader').style.display = 'flex';
+            document.getElementById('currentChatName').innerText = name;
+            document.getElementById('currentChatImg').src = img;
             loadChatHistory();
         }
 
         function loadChatHistory() {
-            if (!currentContactId) return;
-
             const token = document.getElementById('token').value;
-
-            fetch(`http://localhost:3000/api/chat/history/${currentContactId}`, {
+            fetch(`${BASE_URL}/chat/api/chat/history/${currentContactId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        displayMessages(data.data);
-                    } else {
-                        alert('خطأ: ' + (data.error || 'غير معروف'));
+                .then(res => res.json())
+                .then(res => {
+                    if (res.success) {
+                        const msgDiv = document.getElementById('messages');
+                        msgDiv.innerHTML = '';
+                        res.data.forEach(addMessage);
                     }
-                })
-                .catch(error => {
-                    console.error('Error loading chat history:', error);
-                    alert('خطأ في تحميل الرسائل');
                 });
-        }
-
-        function displayMessages(messages) {
-            const container = document.getElementById('messages');
-            container.innerHTML = '';
-
-            if (!messages || messages.length === 0) {
-                container.innerHTML = '<p>لا توجد رسائل</p>';
-                return;
-            }
-
-            messages.forEach(msg => {
-                addMessage(msg);
-            });
         }
 
         function addMessage(msg) {
             const container = document.getElementById('messages');
             const isSent = msg.sender_id == myUserId;
-
             const div = document.createElement('div');
             div.className = `message ${isSent ? 'sent' : 'received'}`;
 
-            const time = msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : '';
-
             div.innerHTML = `
-                <div><strong>${isSent ? 'أنت' : 'المستخدم ' + msg.sender_id}:</strong> ${msg.content}</div>
-                <div style="font-size: 12px; color: #666;">
-                    ${time} • ${msg.status_display || ''}
-                </div>
+                ${msg.content}
+                <span class="msg-time">${new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • ${msg.status_display || ''}</span>
             `;
-
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
         }
 
         function sendMessage() {
-            if (!socket || !socket.connected) {
-                alert('غير متصل');
-                return;
-            }
-
-            if (!currentContactId) {
-                alert('اختر محادثة أولاً');
-                return;
-            }
-
             const input = document.getElementById('messageInput');
             const content = input.value.trim();
-
-            if (!content) return;
+            if (!content || !currentContactId) return;
 
             socket.emit('send_message', {
                 receiver_id: parseInt(currentContactId),
                 content: content
             });
-
             input.value = '';
         }
 
-        // السماح بإرسال الرسالة بالضغط على Enter
-        document.getElementById('messageInput').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') {
-                sendMessage();
-            }
-        });
-
-        document.getElementById('contactId').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') {
-                openChat();
-            }
-        });
+        // إرسال عبر Enter
+        document.getElementById('messageInput').onkeypress = (e) => { if (e.key === 'Enter') sendMessage(); };
     </script>
 </body>
 

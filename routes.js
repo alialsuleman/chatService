@@ -4,11 +4,20 @@ const db = require('./db');
 const axios = require('axios'); // تأكد من تثبيت axios
 const { validateUser } = require('./authService');
 
+// دالة مساعدة لتنسيق الاستجابة
+const formatResponse = (success, message, data = null, errors = [], status = 200) => {
+    return {
+        success,
+        message,
+        data,
+        errors: Array.isArray(errors) ? errors : [errors],
+        timestamp: new Date().toISOString(),
+        status
+    };
+};
+
 // دالة مساعدة لجلب بيانات المستخدم من الـ API الخارجي
 const fetchUserData = async (id, token) => {
-
-
-
     try {
         // التأكد من أن الرابط مبني بشكل صحيح
         const baseUrl = process.env.USER_DATA_API.endsWith('/')
@@ -21,7 +30,6 @@ const fetchUserData = async (id, token) => {
                 'Authorization': `Bearer ${token}`
             }
         });
-
 
         if (response.data && response.data.success) {
             return {
@@ -42,10 +50,14 @@ const fetchUserData = async (id, token) => {
 const authMiddleware = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-    if (!token) return res.status(401).json({ error: 'No token' });
+    if (!token) {
+        return res.status(401).json(formatResponse(false, 'No token provided', null, ['Authentication token is missing'], 401));
+    }
 
     const user = await validateUser(token);
-    if (!user) return res.status(403).json({ error: 'Invalid token' });
+    if (!user) {
+        return res.status(403).json(formatResponse(false, 'Invalid token', null, ['The provided token is invalid'], 403));
+    }
 
     req.user = user;
     next();
@@ -59,7 +71,7 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
     // الحصول على القيم من الـ Query String وتأكيد أنها أرقام
     // إذا أرسل المستخدم page=0 سنعتبرها 1
     const page = Math.max(1, (parseInt(req.query.page) + 1) || 1);
-    const limit = Math.min(parseInt(req.query.limit) || 10, 10);
+    const limit = Math.min(parseInt(req.query.size) || 10, 10);
     const offset = (page - 1) * limit;
 
     try {
@@ -102,31 +114,39 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
             return {
                 ...row,
                 delivery_status: delivery_status,
-                status_display: is_read_display
+                status_display: is_read_display,
+                isMine: row.sender_id === myId
             };
         });
 
         // ملاحظة: في الـ History نفضل عرض الرسائل من الأقدم للأحدث 
         // لكننا جلبناها DESC للحصول على آخر 10 رسائل، لذا سنعكس المصفوفة
-        res.json({
-            success: true,
-            meta: {
-                current_page: page,
-                limit: limit,
-                results_count: enhancedRows.length
+        res.json(formatResponse(
+            true,
+            'Chat history retrieved successfully',
+            {
+                meta: {
+                    current_page: page,
+                    limit: limit,
+                    results_count: enhancedRows.length
+                },
+                data: enhancedRows.reverse()
             },
-            data: enhancedRows.reverse()
-        });
+            [],
+            200
+        ));
     } catch (err) {
         console.error('Error in /history:', err);
-        res.status(500).json({ error: err.message });
+        res.status(500).json(formatResponse(false, 'Failed to retrieve chat history', null, [err.message], 500));
     }
 });
+
 router.get('/inbox', authMiddleware, async (req, res) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-    if (!token) return res.status(401).json({ error: 'No token' });
-
+    if (!token) {
+        return res.status(401).json(formatResponse(false, 'No token provided', null, ['Authentication token is missing'], 401));
+    }
 
     const myId = req.user.id;
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -184,19 +204,265 @@ router.get('/inbox', authMiddleware, async (req, res) => {
             };
         }));
 
-        res.json({
-            success: true,
-            meta: {
-                current_page: page,
-                per_page: limit,
-                count: rows.length
+        res.json(formatResponse(
+            true,
+            'Inbox retrieved successfully',
+            {
+                meta: {
+                    current_page: page,
+                    per_page: limit,
+                    count: rows.length
+                },
+                data: conversationsWithUsers
             },
-            data: conversationsWithUsers
-        });
+            [],
+            200
+        ));
 
     } catch (err) {
         console.error('Error in /inbox:', err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json(formatResponse(false, 'Failed to retrieve inbox', null, [err.message], 500));
     }
 });
+
+
+// 3. البحث في جهات الاتصال السابقة (المستخدمين الذين تواصلت معهم)
+router.get('/search-contacts', authMiddleware, async (req, res) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) {
+        return res.status(401).json(formatResponse(false, 'No token provided', null, ['Authentication token is missing'], 401));
+    }
+
+    const myId = req.user.id;
+    const searchTerm = req.query.q || '';
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(parseInt(req.query.limit) || 10, 20); // حد أقصى 20 نتيجة
+    const offset = (page - 1) * limit;
+
+    // التحقق من وجود مصطلح بحث
+    if (!searchTerm.trim()) {
+        return res.status(400).json(formatResponse(false, 'Search term is required', null, ['Please provide a search query'], 400));
+    }
+
+    try {
+        // جلب جميع المستخدمين الذين تواصلت معهم مع آخر رسالة لكل منهم
+        const contactsSql = `
+            SELECT DISTINCT 
+                CASE 
+                    WHEN sender_id = ? THEN receiver_id 
+                    ELSE sender_id 
+                END as contact_id,
+                MAX(created_at) as last_message_date
+            FROM messages 
+            WHERE sender_id = ? OR receiver_id = ?
+            GROUP BY contact_id
+            ORDER BY last_message_date DESC
+        `;
+
+        const [contactRows] = await db.query(contactsSql, [myId, myId, myId]);
+
+        if (contactRows.length === 0) {
+            return res.json(formatResponse(
+                true,
+                'No contacts found',
+                {
+                    meta: {
+                        current_page: page,
+                        per_page: limit,
+                        total_count: 0,
+                        total_pages: 0
+                    },
+                    data: []
+                },
+                [],
+                200
+            ));
+        }
+
+        // جلب بيانات كل contact من الـ API مع تطبيق البحث
+        const contactsPromises = contactRows.map(async (contact) => {
+            const userData = await fetchUserData(contact.contact_id, token);
+            return {
+                ...userData,
+                last_message_date: contact.last_message_date
+            };
+        });
+
+        let contacts = await Promise.all(contactsPromises);
+
+        // فلترة النتائج حسب مصطلح البحث (بحث في الاسم الأول والأخير)
+        const searchLower = searchTerm.toLowerCase();
+        contacts = contacts.filter(contact =>
+            contact && (
+                (contact.firstname && contact.firstname.toLowerCase().includes(searchLower)) ||
+                (contact.lastname && contact.lastname.toLowerCase().includes(searchLower)) ||
+                (`${contact.firstname || ''} ${contact.lastname || ''}`.toLowerCase().includes(searchLower))
+            )
+        );
+
+        // ترتيب النتائج حسب تاريخ آخر رسالة (الأحدث أولاً)
+        contacts.sort((a, b) => new Date(b.last_message_date) - new Date(a.last_message_date));
+
+        // تطبيق Pagination
+        const totalCount = contacts.length;
+        const totalPages = Math.ceil(totalCount / limit);
+        const paginatedContacts = contacts.slice(offset, offset + limit);
+
+        // جلب آخر رسالة لكل contact
+        const contactsWithLastMessage = await Promise.all(paginatedContacts.map(async (contact) => {
+            // جلب آخر رسالة مع هذا المستخدم
+            const [lastMessageRows] = await db.query(
+                `SELECT * FROM messages 
+                 WHERE (sender_id = ? AND receiver_id = ?) 
+                    OR (sender_id = ? AND receiver_id = ?) 
+                 ORDER BY created_at DESC 
+                 LIMIT 1`,
+                [myId, contact.id, contact.id, myId]
+            );
+
+            // جلب عدد الرسائل غير المقروءة من هذا المستخدم
+            const [unreadRows] = await db.query(
+                `SELECT COUNT(*) as unread_count 
+                 FROM messages 
+                 WHERE sender_id = ? AND receiver_id = ? AND is_read = 0`,
+                [contact.id, myId]
+            );
+
+            const lastMessage = lastMessageRows[0] || null;
+            const unreadCount = unreadRows[0]?.unread_count || 0;
+
+            // تنسيق آخر رسالة للعرض
+            let lastMessagePreview = null;
+            if (lastMessage) {
+                lastMessagePreview = {
+                    id: lastMessage.id,
+                    content: lastMessage.content,
+                    type: lastMessage.type || 'text',
+                    created_at: lastMessage.created_at,
+                    is_mine: lastMessage.sender_id === myId,
+                    is_read: lastMessage.is_read === 1,
+                    is_delivered: lastMessage.is_delivered === 1
+                };
+            }
+
+            return {
+                contact_info: {
+                    id: contact.id,
+                    firstname: contact.firstname || '',
+                    lastname: contact.lastname || '',
+                    fullname: `${contact.firstname || ''} ${contact.lastname || ''}`.trim(),
+                    imagePath: contact.imagePath || null,
+                    bio: contact.bio || null,
+                    email: contact.email || null,
+                    whatsappLink: contact.whatsappLink || null,
+                    facebookLink: contact.facebookLink || null,
+                    telegramLink: contact.telegramLink || null,
+                    linkedinLink: contact.linkedinLink || null
+                },
+                last_message: lastMessagePreview,
+                unread_count: unreadCount,
+                last_message_date: contact.last_message_date
+            };
+        }));
+
+        res.json(formatResponse(
+            true,
+            'Contacts searched successfully',
+            {
+                meta: {
+                    current_page: page,
+                    per_page: limit,
+                    total_count: totalCount,
+                    total_pages: totalPages,
+                    search_term: searchTerm
+                },
+                data: contactsWithLastMessage
+            },
+            [],
+            200
+        ));
+
+    } catch (err) {
+        console.error('Error in /search-contacts:', err);
+        res.status(500).json(formatResponse(false, 'Failed to search contacts', null, [err.message], 500));
+    }
+});
+
+// 4. (اختياري) بحث مبسط يعيد فقط قائمة المستخدمين المتطابقين
+router.get('/search-contacts/simple', authMiddleware, async (req, res) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) {
+        return res.status(401).json(formatResponse(false, 'No token provided', null, ['Authentication token is missing'], 401));
+    }
+
+    const myId = req.user.id;
+    const searchTerm = req.query.q || '';
+
+    if (!searchTerm.trim()) {
+        return res.status(400).json(formatResponse(false, 'Search term is required', null, ['Please provide a search query'], 400));
+    }
+
+    try {
+        // جلب جميع الـ contacts
+        const contactsSql = `
+            SELECT DISTINCT 
+                CASE 
+                    WHEN sender_id = ? THEN receiver_id 
+                    ELSE sender_id 
+                END as contact_id
+            FROM messages 
+            WHERE sender_id = ? OR receiver_id = ?
+        `;
+
+        const [contactRows] = await db.query(contactsSql, [myId, myId, myId]);
+
+        if (contactRows.length === 0) {
+            return res.json(formatResponse(
+                true,
+                'No contacts found',
+                { data: [] },
+                [],
+                200
+            ));
+        }
+
+        // جلب بيانات contacts
+        const contactsPromises = contactRows.map(contact => fetchUserData(contact.contact_id, token));
+        let contacts = await Promise.all(contactsPromises);
+
+        // فلترة حسب البحث
+        const searchLower = searchTerm.toLowerCase();
+        const filteredContacts = contacts.filter(contact =>
+            contact && (
+                (contact.firstname && contact.firstname.toLowerCase().includes(searchLower)) ||
+                (contact.lastname && contact.lastname.toLowerCase().includes(searchLower)) ||
+                (`${contact.firstname || ''} ${contact.lastname || ''}`.toLowerCase().includes(searchLower))
+            )
+        );
+
+        // تنسيق النتائج المبسطة
+        const simplifiedResults = filteredContacts.map(contact => ({
+            id: contact.id,
+            firstname: contact.firstname || '',
+            lastname: contact.lastname || '',
+            fullname: `${contact.firstname || ''} ${contact.lastname || ''}`.trim(),
+            imagePath: contact.imagePath || null
+        }));
+
+        res.json(formatResponse(
+            true,
+            'Contacts searched successfully',
+            { data: simplifiedResults },
+            [],
+            200
+        ));
+
+    } catch (err) {
+        console.error('Error in /search-contacts/simple:', err);
+        res.status(500).json(formatResponse(false, 'Failed to search contacts', null, [err.message], 500));
+    }
+});
+
 module.exports = router;
