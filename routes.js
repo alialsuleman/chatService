@@ -87,7 +87,7 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
             `SELECT * FROM messages 
              WHERE (sender_id = ? AND receiver_id = ?) 
                 OR (sender_id = ? AND receiver_id = ?) 
-             ORDER BY created_at DESC 
+             ORDER BY created_at ASC 
              LIMIT ? OFFSET ?`,
             [myId, contactId, contactId, myId, limit, offset]
         );
@@ -113,8 +113,6 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
 
             return {
                 ...row,
-                delivery_status: delivery_status,
-                status_display: is_read_display,
                 isMine: row.sender_id === myId
             };
         });

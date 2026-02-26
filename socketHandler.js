@@ -51,6 +51,7 @@ module.exports = (io) => {
                 for (const message of pendingMessages) {
                     socket.emit('receive_message', {
                         id: message.id,
+                        uuid: message.uuid, // إضافة uuid
                         sender_id: message.sender_id,
                         receiver_id: message.receiver_id,
                         content: message.content,
@@ -78,24 +79,28 @@ module.exports = (io) => {
 
         // --- استقبال رسالة ---
         socket.on('send_message', async (data) => {
-            const { receiver_id, content } = data;
+            const { receiver_id, content, uuid } = data; // استقبال uuid من العميل
             const sender_id = socket.user.id;
 
-            if (!receiver_id || !content) {
-                return socket.emit('error', { message: 'Missing data' });
+            if (!receiver_id || !content || !uuid) { // التحقق من وجود uuid
+                return socket.emit('error', {
+                    message: 'Missing data',
+                    uuid: uuid || null // إرجاع uuid إذا كان موجوداً
+                });
             }
 
             try {
                 // الحفظ في قاعدة البيانات مع timestamp دقيق
                 const timestamp = new Date();
                 const [result] = await db.execute(
-                    `INSERT INTO messages (sender_id, receiver_id, content, is_delivered, created_at) 
-                     VALUES (?, ?, ?, ?, ?)`,
-                    [sender_id, receiver_id, content, 0, timestamp]
+                    `INSERT INTO messages (sender_id, receiver_id, content, uuid, is_delivered, created_at) 
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                    [sender_id, receiver_id, content, uuid, 0, timestamp]
                 );
 
                 const messagePayload = {
                     id: result.insertId,
+                    uuid: uuid, // إضافة uuid
                     sender_id: sender_id,
                     receiver_id: receiver_id,
                     content: content,
@@ -115,23 +120,36 @@ module.exports = (io) => {
                     );
 
                     messagePayload.is_delivered = 1;
+
+                    // إرسال للمستقبل
                     io.to(`user_${receiver_id}`).emit('receive_message', messagePayload);
 
-                    // إرسال تأكيد مع حالة التسليم
-                    socket.emit('message_sent', { ...messagePayload, is_delivered: 1 });
+                    // إرسال تأكيد للمرسل مع uuid
+                    socket.emit('message_sent', {
+                        uuid: uuid,
+                        id: result.insertId,
+                        is_delivered: 1,
+                        status: 'delivered',
+                        timestamp: messagePayload.created_at
+                    });
                 } else {
                     // المستقبل غير متصل
                     socket.emit('message_sent', {
-                        ...messagePayload,
+                        uuid: uuid,
+                        id: result.insertId,
                         is_delivered: 0,
-                        pending: true,
+                        status: 'pending',
+                        timestamp: messagePayload.created_at,
                         note: 'سوف تصل عندما يتصل المستخدم'
                     });
                 }
 
             } catch (err) {
                 console.error("❌ Error saving message:", err);
-                socket.emit('error', { message: 'Failed to send message' });
+                socket.emit('error', {
+                    message: 'Failed to send message',
+                    uuid: uuid // إرجاع uuid عند حدوث خطأ
+                });
             }
         });
 
