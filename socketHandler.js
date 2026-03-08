@@ -1,5 +1,6 @@
 const { validateUser } = require('./authService');
 const db = require('./db');
+const axios = require('axios'); // إضافة axios
 
 module.exports = (io) => {
 
@@ -15,7 +16,8 @@ module.exports = (io) => {
         if (user) {
             socket.user = {
                 id: user.id,
-                name: user.firstname
+                name: user.firstname,
+                token: token // تخزين التوكن لاستخدامه لاحقاً
             };
             next();
         } else {
@@ -36,10 +38,8 @@ module.exports = (io) => {
         // الانضمام للغرفة
         socket.join(`user_${userId}`);
 
-        // إرسال الرسائل المعلقة لهذا المستخدم عند الاتصال
         const sendPendingMessages = async () => {
             try {
-                // استخدام pagination للرسائل المعلقة لتجنب إرسال عدد كبير دفعة واحدة
                 const [pendingMessages] = await db.execute(
                     `SELECT * FROM messages 
                      WHERE receiver_id = ? AND is_delivered = 0 
@@ -51,7 +51,7 @@ module.exports = (io) => {
                 for (const message of pendingMessages) {
                     socket.emit('receive_message', {
                         id: message.id,
-                        uuid: message.uuid, // إضافة uuid
+                        uuid: message.uuid,
                         sender_id: message.sender_id,
                         receiver_id: message.receiver_id,
                         content: message.content,
@@ -77,20 +77,64 @@ module.exports = (io) => {
 
         sendPendingMessages();
 
+        // دالة للتحقق من وجود رسائل غير مقروءة خلال آخر 10 دقائق
+        const hasRecentUnreadMessages = async (receiverId) => {
+            try {
+                const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+                const [rows] = await db.execute(
+                    `SELECT COUNT(*) as count FROM messages 
+                     WHERE receiver_id = ? AND is_read = 0 AND created_at >= ?`,
+                    [receiverId, tenMinutesAgo]
+                );
+                return rows[0].count > 0;
+            } catch (err) {
+                console.error('Error checking recent unread messages:', err);
+                return false; // في حالة الخطأ، نفضل عدم إرسال إشعار
+            }
+        };
+
+        // دالة لإرسال الإشعار إلى Spring Boot
+        // دالة لإرسال الإشعار إلى Spring Boot
+        const sendNotificationToSpring = async (senderId, receiverId, messageContent, token) => {
+            try {
+                const response = await axios.post(
+                    `${process.env.SPRING_BOOT_API_URL}/notifications/create`,
+                    {
+                        senderId: senderId,      // ✅ إضافة id المرسل
+                        receiverId: receiverId,  // ✅ إضافة id المستقبل
+                        text: messageContent,
+                        timestamp: new Date().toISOString()
+                    },
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    }
+                );
+                console.log(`📱 Notification sent to Spring Boot: From user ${senderId} To user ${receiverId}`);
+                return response.data;
+            } catch (error) {
+                console.error(`❌ Failed to send notification to Spring Boot:`, error.message);
+                return null;
+            }
+        };
+
         // --- استقبال رسالة ---
         socket.on('send_message', async (data) => {
-            const { receiver_id, content, uuid } = data; // استقبال uuid من العميل
+            const { receiver_id, content, uuid } = data;
             const sender_id = socket.user.id;
+            const token = socket.user.token; // التوكن المخزن
 
-            if (!receiver_id || !content || !uuid) { // التحقق من وجود uuid
+            if (!receiver_id || !content || !uuid) {
                 return socket.emit('error', {
                     message: 'Missing data',
-                    uuid: uuid || null // إرجاع uuid إذا كان موجوداً
+                    uuid: uuid || null
                 });
             }
 
             try {
-                // الحفظ في قاعدة البيانات مع timestamp دقيق
+                // الحفظ في قاعدة البيانات
                 const timestamp = new Date();
                 const [result] = await db.execute(
                     `INSERT INTO messages (sender_id, receiver_id, content, uuid, is_delivered, created_at) 
@@ -100,7 +144,7 @@ module.exports = (io) => {
 
                 const messagePayload = {
                     id: result.insertId,
-                    uuid: uuid, // إضافة uuid
+                    uuid: uuid,
                     sender_id: sender_id,
                     receiver_id: receiver_id,
                     content: content,
@@ -109,11 +153,11 @@ module.exports = (io) => {
                     is_delivered: 0
                 };
 
-                // التحقق مما إذا كان المستقبل متصلًا
+                // التحقق مما إذا كان المستقبل متصلاً
                 const receiverSockets = await io.in(`user_${receiver_id}`).fetchSockets();
 
                 if (receiverSockets.length > 0) {
-                    // المستقبل متصل - تحديث وإرسال
+                    // المستقبل متصل
                     await db.execute(
                         `UPDATE messages SET is_delivered = 1 WHERE id = ?`,
                         [result.insertId]
@@ -124,7 +168,7 @@ module.exports = (io) => {
                     // إرسال للمستقبل
                     io.to(`user_${receiver_id}`).emit('receive_message', messagePayload);
 
-                    // إرسال تأكيد للمرسل مع uuid
+                    // إرسال تأكيد للمرسل
                     socket.emit('message_sent', {
                         uuid: uuid,
                         id: result.insertId,
@@ -132,6 +176,8 @@ module.exports = (io) => {
                         status: 'delivered',
                         timestamp: messagePayload.created_at
                     });
+
+                    // المستقبل متصل، لا حاجة لإرسال إشعار خارجي
                 } else {
                     // المستقبل غير متصل
                     socket.emit('message_sent', {
@@ -140,15 +186,26 @@ module.exports = (io) => {
                         is_delivered: 0,
                         status: 'pending',
                         timestamp: messagePayload.created_at,
-                        note: 'سوف تصل عندما يتصل المستخدم'
+                        note: "Any"
                     });
+
+                    // التحقق من عدم وجود رسائل غير مقروءة حديثة لنفس المستقبل
+                    const recentUnread = await hasRecentUnreadMessages(receiver_id);
+
+                    if (!recentUnread) {
+                        // لا توجد رسائل غير مقروءة خلال آخر 10 دقائق → أرسل إشعار إلى Spring Boot
+                        await sendNotificationToSpring(
+                            sender_id, receiver_id, content, token);
+                    } else {
+                        console.log(`⏳ Skipping notification for user ${receiver_id}: recent unread messages exist`);
+                    }
                 }
 
             } catch (err) {
                 console.error("❌ Error saving message:", err);
                 socket.emit('error', {
                     message: 'Failed to send message',
-                    uuid: uuid // إرجاع uuid عند حدوث خطأ
+                    uuid: uuid
                 });
             }
         });

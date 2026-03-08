@@ -63,16 +63,14 @@ const authMiddleware = async (req, res, next) => {
     next();
 };
 
-// 1. جلب سجل المحادثة - نسخة الـ Pagination المصححة
+// 1. جلب سجل المحادثة - نسخة Cursor Pagination
 router.get('/history/:contactId', authMiddleware, async (req, res) => {
     const myId = req.user.id;
     const contactId = req.params.contactId;
 
-    // الحصول على القيم من الـ Query String وتأكيد أنها أرقام
-    // إذا أرسل المستخدم page=0 سنعتبرها 1
-    const page = Math.max(1, (parseInt(req.query.page) + 1) || 1);
-    const limit = Math.min(parseInt(req.query.size) || 10, 10);
-    const offset = (page - 1) * limit;
+    // قراءة وتجهيز المعاملات
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50); // حد أقصى 50
+    const cursor = parseInt(req.query.cursor); // قد يكون undefined أو NaN
 
     try {
         // تحديث الرسائل المستلمة لتصبح مقروءة
@@ -82,53 +80,55 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
             [contactId, myId]
         );
 
-        // جلب الرسائل باستخدام db.query لحل مشكلة LIMIT/OFFSET
-        const [rows] = await db.query(
-            `SELECT * FROM messages 
-             WHERE (sender_id = ? AND receiver_id = ?) 
-                OR (sender_id = ? AND receiver_id = ?) 
-             ORDER BY created_at ASC 
-             LIMIT ? OFFSET ?`,
-            [myId, contactId, contactId, myId, limit, offset]
-        );
+        // بناء الاستعلام الأساسي
+        let sql = `
+            SELECT * FROM messages 
+            WHERE (sender_id = ? AND receiver_id = ?) 
+               OR (sender_id = ? AND receiver_id = ?)
+        `;
+        const params = [myId, contactId, contactId, myId];
 
-        // إضافة حالة التسليم والبيانات الإضافية
-        const enhancedRows = rows.map(row => {
-            let delivery_status = 'received';
-            if (row.sender_id === myId) {
-                delivery_status = row.is_delivered === 0 ? 'pending' : 'delivered';
-            }
+        // إضافة شرط cursor إذا وُجد (جلب الرسائل الأقدم من الـ cursor)
+        if (cursor && !isNaN(cursor)) {
+            sql += ` AND id < ?`;
+            params.push(cursor);
+        }
 
-            let is_read_display = row.is_read === 1 ? 'Read' : 'New';
+        // ترتيب تنازلي وجلب عدد أكبر بواحد لمعرفة وجود صفحة تالية
+        sql += ` ORDER BY id DESC LIMIT ?`;
+        params.push(limit + 1);
 
-            if (row.sender_id === myId) {
-                if (row.is_delivered === 0) {
-                    is_read_display = 'Pending'; // أو 'Sending...'
-                } else if (row.is_read === 1) {
-                    is_read_display = 'Read';    // تعادل الـ ✓✓ الزرقاء في واتساب
-                } else {
-                    is_read_display = 'Sent';    // تم الإرسال ولكن لم يقرأ بعد
-                }
-            }
+        // تنفيذ الاستعلام
+        const [rows] = await db.query(sql, params);
 
-            return {
-                ...row,
-                isMine: row.sender_id === myId
-            };
-        });
+        // تحديد ما إذا كانت هناك صفحة تالية وحساب next_cursor
+        let nextCursor = null;
+        let data = rows;
 
-        // ملاحظة: في الـ History نفضل عرض الرسائل من الأقدم للأحدث 
-        // لكننا جلبناها DESC للحصول على آخر 10 رسائل، لذا سنعكس المصفوفة
+        if (rows.length > limit) {
+            // يوجد صفحة تالية: نأخذ أول limit عنصر فقط
+            data = rows.slice(0, limit);
+            // آخر عنصر في الصفحة الحالية هو cursor للصفحة التالية
+            nextCursor = data[data.length - 1].id;
+        }
+
+        // إضافة حقل isMine لكل رسالة
+        const enhancedRows = data.map(row => ({
+            ...row,
+            isMine: row.sender_id === myId
+        }));
+
+        // الرد
         res.json(formatResponse(
             true,
             'Chat history retrieved successfully',
             {
                 meta: {
-                    current_page: page,
                     limit: limit,
-                    results_count: enhancedRows.length
+                    results_count: enhancedRows.length,
+                    next_cursor: nextCursor
                 },
-                data: enhancedRows.reverse()
+                data: enhancedRows // ترسل بترتيب تنازلي (الأحدث أولاً)
             },
             [],
             200
@@ -138,6 +138,8 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
         res.status(500).json(formatResponse(false, 'Failed to retrieve chat history', null, [err.message], 500));
     }
 });
+
+
 router.get('/inbox', authMiddleware, async (req, res) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
