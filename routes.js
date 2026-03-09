@@ -128,8 +128,8 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
                     results_count: enhancedRows.length,
                     next_cursor: nextCursor,
                     cursor_received: cursor,
-                    sql_used: sql,
-                    params_used: params
+                    //sql_used: sql,
+                    // params_used: params
                 },
                 data: enhancedRows
             },
