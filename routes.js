@@ -62,15 +62,14 @@ const authMiddleware = async (req, res, next) => {
     req.user = user;
     next();
 };
-
-// 1. جلب سجل المحادثة - نسخة Cursor Pagination
+// 1. جلب سجل المحادثة - نسخة Cursor Pagination مع أقواس صحيحة
 router.get('/history/:contactId', authMiddleware, async (req, res) => {
     const myId = req.user.id;
     const contactId = req.params.contactId;
 
     // قراءة وتجهيز المعاملات
-    const limit = Math.min(parseInt(req.query.limit) || 10, 50); // حد أقصى 50
-    const cursor = parseInt(req.query.cursor); // قد يكون undefined أو NaN
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const cursor = req.query.cursor ? parseInt(req.query.cursor) : null;
 
     try {
         // تحديث الرسائل المستلمة لتصبح مقروءة
@@ -80,23 +79,26 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
             [contactId, myId]
         );
 
-        // بناء الاستعلام الأساسي
+        // بناء الاستعلام الأساسي - مع أقواس صحيحة
         let sql = `
             SELECT * FROM messages 
-            WHERE (sender_id = ? AND receiver_id = ?) 
-               OR (sender_id = ? AND receiver_id = ?)
+            WHERE ((sender_id = ? AND receiver_id = ?) 
+               OR (sender_id = ? AND receiver_id = ?))
         `;
         const params = [myId, contactId, contactId, myId];
 
-        // إضافة شرط cursor إذا وُجد (جلب الرسائل الأقدم من الـ cursor)
-        if (cursor && !isNaN(cursor)) {
+        // إضافة شرط cursor إذا وُجد - داخل نفس مستوى الشروط
+        if (cursor && !isNaN(cursor) && cursor > 0) {
             sql += ` AND id < ?`;
             params.push(cursor);
         }
 
-        // ترتيب تنازلي وجلب عدد أكبر بواحد لمعرفة وجود صفحة تالية
+        // ترتيب تنازلي وجلب عدد أكبر بواحد
         sql += ` ORDER BY id DESC LIMIT ?`;
         params.push(limit + 1);
+
+        console.log('Final SQL:', sql);
+        console.log('Params:', params);
 
         // تنفيذ الاستعلام
         const [rows] = await db.query(sql, params);
@@ -106,9 +108,7 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
         let data = rows;
 
         if (rows.length > limit) {
-            // يوجد صفحة تالية: نأخذ أول limit عنصر فقط
             data = rows.slice(0, limit);
-            // آخر عنصر في الصفحة الحالية هو cursor للصفحة التالية
             nextCursor = data[data.length - 1].id;
         }
 
@@ -118,7 +118,7 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
             isMine: row.sender_id === myId
         }));
 
-        // الرد
+        // الرد مع معلومات إضافية للتأكد
         res.json(formatResponse(
             true,
             'Chat history retrieved successfully',
@@ -127,10 +127,11 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
                     limit: limit,
                     results_count: enhancedRows.length,
                     next_cursor: nextCursor,
-                    sql,
-                    params
+                    cursor_received: cursor,
+                    sql_used: sql,
+                    params_used: params
                 },
-                data: enhancedRows // ترسل بترتيب تنازلي (الأحدث أولاً)
+                data: enhancedRows
             },
             [],
             200
@@ -140,8 +141,6 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
         res.status(500).json(formatResponse(false, 'Failed to retrieve chat history', null, [err.message], 500));
     }
 });
-
-
 router.get('/inbox', authMiddleware, async (req, res) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
