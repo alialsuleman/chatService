@@ -126,7 +126,9 @@ router.get('/history/:contactId', authMiddleware, async (req, res) => {
                 meta: {
                     limit: limit,
                     results_count: enhancedRows.length,
-                    next_cursor: nextCursor
+                    next_cursor: nextCursor,
+                    sql,
+                    params
                 },
                 data: enhancedRows // ترسل بترتيب تنازلي (الأحدث أولاً)
             },
