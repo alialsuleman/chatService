@@ -6,6 +6,7 @@
     <title>نظام الدردشة المتقدم</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
+        /* نفس الـ style السابق - لم يتغير */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 20px;
@@ -390,7 +391,6 @@
             // الاتصال بـ Socket.io
             socket = io(BASE_URL, {
                 auth: { token },
-                path: '/socket.io/',
                 transports: ['websocket', 'polling'],
                 reconnection: true,
                 reconnectionAttempts: 5
@@ -412,23 +412,21 @@
             });
 
             socket.on('receive_message', (data) => {
+                logDebug('📩 رسالة واردة:', data);
                 if (currentContactId == data.sender_id) {
                     addMessage(data);
                 }
                 loadInbox(); // تحديث صندوق الوارد
                 showNotification('رسالة جديدة', data.content);
-                logDebug('رسالة واردة:', data);
             });
 
             socket.on('message_sent', (data) => {
-                if (currentContactId == data.receiver_id) {
+                logDebug('✅ تم تأكيد إرسال الرسالة:', data);
+                // إضافة الرسالة إلى المحادثة الحالية إذا كانت للمستلم الحالي
+                if (currentContactId && data.receiver_id == currentContactId) {
                     addMessage(data);
                 }
-                if (data.pending) {
-                    console.log('الرسالة في الانتظار:', data.note);
-                }
                 loadInbox();
-                logDebug('تم إرسال الرسالة:', data);
             });
 
             socket.on('pending_delivered', (data) => {
@@ -535,6 +533,7 @@
             document.getElementById('currentChatImg').src = img;
             document.getElementById('messageInput').disabled = false;
             document.getElementById('sendBtn').disabled = false;
+            document.getElementById('messageInput').focus(); // تركيز على حقل الإدخال
             loadChatHistory();
             logDebug('فتح محادثة:', { partnerId, name });
         }
@@ -554,7 +553,21 @@
                     if (res.success) {
                         const msgDiv = document.getElementById('messages');
                         msgDiv.innerHTML = '';
-                        res.data.data.forEach(addMessage);
+                        if (res.data && res.data.data) {
+                            res.data.data.forEach(msg => {
+                                // التأكد من تنسيق البيانات بشكل صحيح
+                                const formattedMsg = {
+                                    id: msg.id,
+                                    sender_id: msg.sender_id,
+                                    receiver_id: msg.receiver_id,
+                                    content: msg.content,
+                                    created_at: msg.created_at,
+                                    is_read: msg.is_read,
+                                    is_delivered: msg.is_delivered
+                                };
+                                addMessage(formattedMsg);
+                            });
+                        }
                     } else {
                         document.getElementById('messages').innerHTML = `<div class="error-message">${res.message}</div>`;
                     }
@@ -567,16 +580,36 @@
 
         function addMessage(msg) {
             const container = document.getElementById('messages');
+            
+            // التحقق من وجود الرسالة
+            if (!msg || !msg.content) return;
+            
             const isSent = msg.sender_id == myUserId;
             const div = document.createElement('div');
             div.className = `message ${isSent ? 'sent' : 'received'}`;
 
-            const time = new Date(msg.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-            const status = msg.status_display || (msg.is_read ? 'مقروءة' : msg.is_delivered ? 'تم التسليم' : 'جاري الإرسال...');
+            // تنسيق الوقت
+            let timeStr = '';
+            if (msg.created_at) {
+                const time = new Date(msg.created_at);
+                timeStr = time.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+            } else {
+                timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+            }
+
+            // تحديد حالة الرسالة
+            let status = '';
+            if (msg.is_read) {
+                status = 'مقروءة';
+            } else if (msg.is_delivered) {
+                status = 'تم التسليم';
+            } else if (msg.id) {
+                status = 'تم الإرسال';
+            }
 
             div.innerHTML = `
                 ${msg.content}
-                <span class="msg-time">${time} • ${status}</span>
+                <span class="msg-time">${timeStr} ${status ? '• ' + status : ''}</span>
             `;
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
@@ -585,12 +618,51 @@
         function sendMessage() {
             const input = document.getElementById('messageInput');
             const content = input.value.trim();
-            if (!content || !currentContactId) return;
+            
+            if (!content) {
+                alert('الرجاء كتابة رسالة');
+                return;
+            }
+            
+            if (!currentContactId) {
+                alert('الرجاء اختيار مستخدم أولاً');
+                return;
+            }
 
+            if (!socket || !socket.connected) {
+                alert('الرجاء الاتصال أولاً');
+                return;
+            }
+
+            // إنشاء UUID مؤقت للرسالة
+            const uuid = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+            logDebug('إرسال رسالة:', { 
+                receiver_id: currentContactId, 
+                content: content,
+                uuid: uuid 
+            });
+
+            // إرسال الرسالة
             socket.emit('send_message', {
                 receiver_id: parseInt(currentContactId),
-                content: content
+                content: content,
+                uuid: uuid
             });
+
+            // إضافة الرسالة مؤقتاً إلى المحادثة
+            const tempMsg = {
+                id: 'temp_' + Date.now(),
+                sender_id: myUserId,
+                receiver_id: parseInt(currentContactId),
+                content: content,
+                created_at: new Date().toISOString(),
+                is_read: false,
+                is_delivered: false
+            };
+            addMessage(tempMsg);
+
+            // مسح حقل الإدخال
             input.value = '';
         }
 
