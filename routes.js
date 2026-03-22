@@ -237,16 +237,14 @@ router.get('/search-contacts', authMiddleware, async (req, res) => {
     const myId = req.user.id;
     const searchTerm = req.query.q || '';
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = 10; // Matching inbox limit
+    const limit = 10;
     const offset = (page - 1) * limit;
 
-    // التحقق من وجود مصطلح بحث
     if (!searchTerm.trim()) {
         return res.status(400).json(formatResponse(false, 'Search term is required', null, ['Please provide a search query'], 400));
     }
 
     try {
-        // First, get all conversations (similar to inbox)
         const sql = `
             SELECT m1.*, 
             (
@@ -269,25 +267,7 @@ router.get('/search-contacts', authMiddleware, async (req, res) => {
         const params = [myId, myId, myId, myId, myId, myId];
         const [rows] = await db.query(sql, params);
 
-        if (rows.length === 0) {
-            return res.json(formatResponse(
-                true,
-                'No contacts found',
-                {
-                    meta: {
-                        current_page: page,
-                        per_page: limit,
-                        count: 0
-                    },
-                    data: []
-                },
-                [],
-                200
-            ));
-        }
-
-        // Fetch user data for all partners
-        const allConversationsWithUsers = await Promise.all(rows.map(async (conv) => {
+        const conversationsWithUsers = await Promise.all(rows.map(async (conv) => {
             const userData = await fetchUserData(conv.partner_id, token);
 
             return {
@@ -313,33 +293,14 @@ router.get('/search-contacts', authMiddleware, async (req, res) => {
             };
         }));
 
-        // Filter conversations based on search term
-        const searchLower = searchTerm.toLowerCase();
-        const filteredConversations = allConversationsWithUsers.filter(conv => {
+        const filteredConversations = conversationsWithUsers.filter(conv => {
             const partner = conv.partner_info;
-            const fullName = `${partner.firstname || ''} ${partner.lastname || ''}`.toLowerCase();
-            const firstNameMatch = partner.firstname && partner.firstname.toLowerCase().includes(searchLower);
-            const lastNameMatch = partner.lastname && partner.lastname.toLowerCase().includes(searchLower);
-            const fullNameMatch = fullName.includes(searchLower);
-
-            return firstNameMatch || lastNameMatch || fullNameMatch;
+            const searchLower = searchTerm.toLowerCase();
+            return (partner.firstname && partner.firstname.toLowerCase().includes(searchLower)) ||
+                (partner.lastname && partner.lastname.toLowerCase().includes(searchLower));
         });
 
-        // Apply pagination
-        const totalCount = filteredConversations.length;
-        const totalPages = Math.ceil(totalCount / limit);
         const paginatedConversations = filteredConversations.slice(offset, offset + limit);
-
-        // Format response to match inbox structure exactly
-        const formattedData = paginatedConversations.map(conv => {
-            // Remove partner_info and merge into root level
-            const { partner_info, ...rest } = conv;
-            return {
-                ...rest,
-                ...partner_info, // Spread partner_info to root level
-                unread_count: conv.unread_count // Ensure unread_count is at root level
-            };
-        });
 
         res.json(formatResponse(
             true,
@@ -348,12 +309,9 @@ router.get('/search-contacts', authMiddleware, async (req, res) => {
                 meta: {
                     current_page: page,
                     per_page: limit,
-                    count: paginatedConversations.length,
-                    total_count: totalCount,
-                    total_pages: totalPages,
-                    search_term: searchTerm
+                    count: paginatedConversations.length
                 },
-                data: formattedData
+                data: paginatedConversations
             },
             [],
             200
