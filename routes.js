@@ -237,7 +237,7 @@ router.get('/search-contacts', authMiddleware, async (req, res) => {
     const myId = req.user.id;
     const searchTerm = req.query.q || '';
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(parseInt(req.query.limit) || 10, 20); // حد أقصى 20 نتيجة
+    const limit = 10; // Matching inbox limit
     const offset = (page - 1) * limit;
 
     // التحقق من وجود مصطلح بحث
@@ -246,23 +246,30 @@ router.get('/search-contacts', authMiddleware, async (req, res) => {
     }
 
     try {
-        // جلب جميع المستخدمين الذين تواصلت معهم مع آخر رسالة لكل منهم
-        const contactsSql = `
-            SELECT DISTINCT 
-                CASE 
-                    WHEN sender_id = ? THEN receiver_id 
-                    ELSE sender_id 
-                END as contact_id,
-                MAX(created_at) as last_message_date
-            FROM messages 
-            WHERE sender_id = ? OR receiver_id = ?
-            GROUP BY contact_id
-            ORDER BY last_message_date DESC
-        `;
+        // First, get all conversations (similar to inbox)
+        const sql = `
+            SELECT m1.*, 
+            (
+                SELECT COUNT(*) 
+                FROM messages 
+                WHERE sender_id = (CASE WHEN m1.sender_id = ? THEN m1.receiver_id ELSE m1.sender_id END) 
+                  AND receiver_id = ? 
+                  AND is_read = 0
+            ) as unread_count,
+            CASE WHEN m1.sender_id = ? THEN m1.receiver_id ELSE m1.sender_id END as partner_id
+            FROM messages m1
+            INNER JOIN (
+                SELECT MAX(id) as max_id 
+                FROM messages 
+                WHERE sender_id = ? OR receiver_id = ? 
+                GROUP BY CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END
+            ) m2 ON m1.id = m2.max_id
+            ORDER BY m1.created_at DESC`;
 
-        const [contactRows] = await db.query(contactsSql, [myId, myId, myId]);
+        const params = [myId, myId, myId, myId, myId, myId];
+        const [rows] = await db.query(sql, params);
 
-        if (contactRows.length === 0) {
+        if (rows.length === 0) {
             return res.json(formatResponse(
                 true,
                 'No contacts found',
@@ -270,8 +277,7 @@ router.get('/search-contacts', authMiddleware, async (req, res) => {
                     meta: {
                         current_page: page,
                         per_page: limit,
-                        total_count: 0,
-                        total_pages: 0
+                        count: 0
                     },
                     data: []
                 },
@@ -280,91 +286,60 @@ router.get('/search-contacts', authMiddleware, async (req, res) => {
             ));
         }
 
-        // جلب بيانات كل contact من الـ API مع تطبيق البحث
-        const contactsPromises = contactRows.map(async (contact) => {
-            const userData = await fetchUserData(contact.contact_id, token);
-            return {
-                ...userData,
-                last_message_date: contact.last_message_date
-            };
-        });
-
-        let contacts = await Promise.all(contactsPromises);
-
-        // فلترة النتائج حسب مصطلح البحث (بحث في الاسم الأول والأخير)
-        const searchLower = searchTerm.toLowerCase();
-        contacts = contacts.filter(contact =>
-            contact && (
-                (contact.firstname && contact.firstname.toLowerCase().includes(searchLower)) ||
-                (contact.lastname && contact.lastname.toLowerCase().includes(searchLower)) ||
-                (`${contact.firstname || ''} ${contact.lastname || ''}`.toLowerCase().includes(searchLower))
-            )
-        );
-
-        // ترتيب النتائج حسب تاريخ آخر رسالة (الأحدث أولاً)
-        contacts.sort((a, b) => new Date(b.last_message_date) - new Date(a.last_message_date));
-
-        // تطبيق Pagination
-        const totalCount = contacts.length;
-        const totalPages = Math.ceil(totalCount / limit);
-        const paginatedContacts = contacts.slice(offset, offset + limit);
-
-        // جلب آخر رسالة لكل contact
-        const contactsWithLastMessage = await Promise.all(paginatedContacts.map(async (contact) => {
-            // جلب آخر رسالة مع هذا المستخدم
-            const [lastMessageRows] = await db.query(
-                `SELECT * FROM messages 
-                 WHERE (sender_id = ? AND receiver_id = ?) 
-                    OR (sender_id = ? AND receiver_id = ?) 
-                 ORDER BY created_at DESC 
-                 LIMIT 1`,
-                [myId, contact.id, contact.id, myId]
-            );
-
-            // جلب عدد الرسائل غير المقروءة من هذا المستخدم
-            const [unreadRows] = await db.query(
-                `SELECT COUNT(*) as unread_count 
-                 FROM messages 
-                 WHERE sender_id = ? AND receiver_id = ? AND is_read = 0`,
-                [contact.id, myId]
-            );
-
-            const lastMessage = lastMessageRows[0] || null;
-            const unreadCount = unreadRows[0]?.unread_count || 0;
-
-            // تنسيق آخر رسالة للعرض
-            let lastMessagePreview = null;
-            if (lastMessage) {
-                lastMessagePreview = {
-                    id: lastMessage.id,
-                    content: lastMessage.content,
-                    type: lastMessage.type || 'text',
-                    created_at: lastMessage.created_at,
-                    is_mine: lastMessage.sender_id === myId,
-                    is_read: lastMessage.is_read === 1,
-                    is_delivered: lastMessage.is_delivered === 1
-                };
-            }
+        // Fetch user data for all partners
+        const allConversationsWithUsers = await Promise.all(rows.map(async (conv) => {
+            const userData = await fetchUserData(conv.partner_id, token);
 
             return {
-                contact_info: {
-                    id: contact.id,
-                    firstname: contact.firstname || '',
-                    lastname: contact.lastname || '',
-                    fullname: `${contact.firstname || ''} ${contact.lastname || ''}`.trim(),
-                    imagePath: contact.imagePath || null,
-                    bio: contact.bio || null,
-                    email: contact.email || null,
-                    whatsappLink: contact.whatsappLink || null,
-                    facebookLink: contact.facebookLink || null,
-                    telegramLink: contact.telegramLink || null,
-                    linkedinLink: contact.linkedinLink || null
-                },
-                last_message: lastMessagePreview,
-                unread_count: unreadCount,
-                last_message_date: contact.last_message_date
+                ...conv,
+                isMine: conv.sender_id === myId,
+                partner_info: userData ? {
+                    id: userData.id,
+                    firstname: userData.firstname,
+                    lastname: userData.lastname,
+                    imagePath: userData.imagePath,
+                    bio: userData.bio,
+                    email: userData.email,
+                    whatsappLink: userData.whatsappLink,
+                    facebookLink: userData.facebookLink,
+                    telegramLink: userData.telegramLink,
+                    linkedinLink: userData.linkedinLink
+                } : {
+                    id: conv.partner_id,
+                    firstname: "User",
+                    lastname: String(conv.partner_id),
+                    imagePath: null
+                }
             };
         }));
+
+        // Filter conversations based on search term
+        const searchLower = searchTerm.toLowerCase();
+        const filteredConversations = allConversationsWithUsers.filter(conv => {
+            const partner = conv.partner_info;
+            const fullName = `${partner.firstname || ''} ${partner.lastname || ''}`.toLowerCase();
+            const firstNameMatch = partner.firstname && partner.firstname.toLowerCase().includes(searchLower);
+            const lastNameMatch = partner.lastname && partner.lastname.toLowerCase().includes(searchLower);
+            const fullNameMatch = fullName.includes(searchLower);
+
+            return firstNameMatch || lastNameMatch || fullNameMatch;
+        });
+
+        // Apply pagination
+        const totalCount = filteredConversations.length;
+        const totalPages = Math.ceil(totalCount / limit);
+        const paginatedConversations = filteredConversations.slice(offset, offset + limit);
+
+        // Format response to match inbox structure exactly
+        const formattedData = paginatedConversations.map(conv => {
+            // Remove partner_info and merge into root level
+            const { partner_info, ...rest } = conv;
+            return {
+                ...rest,
+                ...partner_info, // Spread partner_info to root level
+                unread_count: conv.unread_count // Ensure unread_count is at root level
+            };
+        });
 
         res.json(formatResponse(
             true,
@@ -373,11 +348,12 @@ router.get('/search-contacts', authMiddleware, async (req, res) => {
                 meta: {
                     current_page: page,
                     per_page: limit,
+                    count: paginatedConversations.length,
                     total_count: totalCount,
                     total_pages: totalPages,
                     search_term: searchTerm
                 },
-                data: contactsWithLastMessage
+                data: formattedData
             },
             [],
             200
