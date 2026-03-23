@@ -1,6 +1,6 @@
 const { validateUser } = require('./authService');
 const db = require('./db');
-const axios = require('axios'); // إضافة axios
+const axios = require('axios');
 
 module.exports = (io) => {
 
@@ -17,7 +17,7 @@ module.exports = (io) => {
             socket.user = {
                 id: user.id,
                 name: user.firstname,
-                token: token // تخزين التوكن لاستخدامه لاحقاً
+                token: token
             };
             next();
         } else {
@@ -28,6 +28,9 @@ module.exports = (io) => {
     io.on('connection', (socket) => {
         const userId = socket.user.id;
         console.log(`✅ User Connected: ${socket.user.name} (ID: ${userId})`);
+
+        // تخزين المحادثات النشطة للمستخدم
+        socket.activeConversations = new Set();
 
         // إرسال معلومات المستخدم إلى العميل
         socket.emit('user_info', {
@@ -77,52 +80,145 @@ module.exports = (io) => {
 
         sendPendingMessages();
 
-        // دالة للتحقق من وجود رسائل غير مقروءة خلال آخر 10 دقائق
-        const hasRecentUnreadMessages = async (receiverId) => {
+        // حدث دخول المستخدم إلى محادثة معينة
+        socket.on('join_conversation', (data) => {
+            const { conversation_id, other_user_id } = data;
+
+            if (conversation_id) {
+                socket.activeConversations.add(conversation_id);
+                console.log(`👤 User ${userId} joined conversation ${conversation_id}`);
+            }
+
+            // تخزين ID المستخدم الآخر
+            if (other_user_id) {
+                socket.currentConversationWith = other_user_id;
+            }
+        });
+
+        // حدث خروج المستخدم من محادثة معينة
+        socket.on('leave_conversation', (data) => {
+            const { conversation_id } = data;
+
+            if (conversation_id) {
+                socket.activeConversations.delete(conversation_id);
+                console.log(`👋 User ${userId} left conversation ${conversation_id}`);
+            }
+
+            // مسح المحادثة الحالية
+            if (socket.currentConversationWith) {
+                socket.currentConversationWith = null;
+            }
+        });
+
+        // دالة للحصول على معلومات المستخدم الشريك
+        const getPartnerInfo = async (partnerId) => {
             try {
-                const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
                 const [rows] = await db.execute(
-                    `SELECT COUNT(*) as count FROM messages 
-                     WHERE receiver_id = ? AND is_read = 0 AND created_at >= ?`,
-                    [receiverId, tenMinutesAgo]
+                    `SELECT id, firstname, lastname, imagePath FROM users WHERE id = ?`,
+                    [partnerId]
                 );
-                return rows[0].count > 0;
+
+                if (rows.length > 0) {
+                    return {
+                        id: rows[0].id,
+                        firstname: rows[0].firstname,
+                        lastname: rows[0].lastname,
+                        imagePath: rows[0].imagePath || null
+                    };
+                }
+                return null;
             } catch (err) {
-                console.error('Error checking recent unread messages:', err);
-                return false; // في حالة الخطأ، نفضل عدم إرسال إشعار
+                console.error('Error getting partner info:', err);
+                return null;
             }
         };
 
-        // دالة لإرسال الإشعار إلى Spring Boot
-        // دالة لإرسال الإشعار إلى Spring Boot
-        const sendNotificationToSpring = async (senderId, receiverId, messageContent, token) => {
+        // دالة لحساب عدد الرسائل غير المقروءة
+        const getUnreadCount = async (userId, partnerId) => {
             try {
+                const [rows] = await db.execute(
+                    `SELECT COUNT(*) as count FROM messages 
+                     WHERE sender_id = ? AND receiver_id = ? AND is_read = 0`,
+                    [partnerId, userId]
+                );
+                return rows[0].count;
+            } catch (err) {
+                console.error('Error getting unread count:', err);
+                return 0;
+            }
+        };
+
+        // دالة لإرسال الإشعار إلى Spring Boot مع تفاصيل كاملة
+        const sendNotificationToSpring = async (senderId, receiverId, messageId, uuid, content, createdAt) => {
+            try {
+                // الحصول على معلومات المرسل (الشريك بالنسبة للمستقبل)
+                const partnerInfo = await getPartnerInfo(senderId);
+
+                // حساب عدد الرسائل غير المقروءة للمستقبل من هذا المرسل
+                const unreadCount = await getUnreadCount(receiverId, senderId);
+
+                // بناء payload الإشعار بالشكل المطلوب
+                const notificationPayload = {
+                    id: messageId,
+                    uuid: uuid,
+                    sender_id: senderId,
+                    receiver_id: receiverId,
+                    content: content,
+                    is_read: 0,
+                    created_at: createdAt,
+                    is_delivered: 0,
+                    unread_count: unreadCount,
+                    partner_id: senderId,
+                    isMine: false, // للمستقبل، هذه الرسالة ليست منه
+                    partner_info: partnerInfo
+                };
+
                 const response = await axios.post(
                     `${process.env.SPRING_BOOT_API_URL}/notifications/create`,
-                    {
-                        senderId: senderId,      // ✅ إضافة id المرسل
-                        receiverId: receiverId,  // ✅ إضافة id المستقبل
-                        text: messageContent,
-                        timestamp: new Date().toISOString()
-                    },
+                    notificationPayload,
                     {
                         headers: {
-                            'Authorization': `Bearer ${token}`,
+                            'Authorization': `Bearer ${socket.user.token}`,
                             'Content-Type': 'application/json'
                         }
                     }
                 );
-                console.log(`📱 Notification sent to Spring Boot: From user ${senderId} To user ${receiverId}`);
+                console.log(`📱 Full notification sent to Spring Boot: From user ${senderId} To user ${receiverId}`);
                 return response.data;
             } catch (error) {
                 console.error(`❌ Failed to send notification to Spring Boot:`, error.message);
+                if (error.response) {
+                    console.error('Response data:', error.response.data);
+                }
                 return null;
+            }
+        };
+
+        // دالة للتحقق مما إذا كان المستخدم في نفس المحادثة
+        const checkUserInSameConversation = async (senderId, receiverId) => {
+            try {
+                // الحصول على جميع Sockets للمستقبل
+                const receiverSockets = await io.in(`user_${receiverId}`).fetchSockets();
+
+                // التحقق مما إذا كان أي من Sockets المستقبل في نفس المحادثة مع المرسل
+                for (const receiverSocket of receiverSockets) {
+                    // إذا كان المستقبل في محادثة نشطة مع المرسل
+                    if (receiverSocket.activeConversations &&
+                        receiverSocket.activeConversations.size > 0 &&
+                        receiverSocket.currentConversationWith === senderId) {
+                        return true;
+                    }
+                }
+                return false;
+            } catch (err) {
+                console.error('Error checking conversation:', err);
+                return false;
             }
         };
 
         // استقبال رسالة
         socket.on('send_message', async (data) => {
-            const { receiver_id, content, uuid } = data;
+            const { receiver_id, content, uuid, conversation_id } = data;
             const sender_id = socket.user.id;
             const token = socket.user.token;
 
@@ -138,7 +234,7 @@ module.exports = (io) => {
                 const timestamp = new Date();
                 const [result] = await db.execute(
                     `INSERT INTO messages (sender_id, receiver_id, content, uuid, is_delivered, created_at) 
-             VALUES (?, ?, ?, ?, ?, ?)`,
+                     VALUES (?, ?, ?, ?, ?, ?)`,
                     [sender_id, receiver_id, content, uuid, 0, timestamp]
                 );
 
@@ -157,26 +253,68 @@ module.exports = (io) => {
                 const receiverSockets = await io.in(`user_${receiver_id}`).fetchSockets();
 
                 if (receiverSockets.length > 0) {
-                    // المستقبل متصل
-                    await db.execute(
-                        `UPDATE messages SET is_delivered = 1 WHERE id = ?`,
-                        [result.insertId]
-                    );
+                    // التحقق مما إذا كان المستقبل في نفس المحادثة
+                    const isInSameConversation = await checkUserInSameConversation(sender_id, receiver_id);
 
-                    messagePayload.is_delivered = 1;
+                    if (isInSameConversation) {
+                        // المستخدم في نفس المحادثة - لا نرسل إشعار
+                        console.log(`💬 User ${receiver_id} is in same conversation - no notification sent`);
 
-                    io.to(`user_${receiver_id}`).emit('receive_message', messagePayload);
+                        // تحديث حالة التسليم
+                        await db.execute(
+                            `UPDATE messages SET is_delivered = 1 WHERE id = ?`,
+                            [result.insertId]
+                        );
 
-                    socket.emit('message_sent', {
-                        uuid: uuid,
-                        id: result.insertId,
-                        is_delivered: 1,
-                        status: 'delivered',
-                        timestamp: messagePayload.created_at
-                    });
+                        messagePayload.is_delivered = 1;
 
+                        // إرسال الرسالة فقط
+                        io.to(`user_${receiver_id}`).emit('receive_message', messagePayload);
+
+                        socket.emit('message_sent', {
+                            uuid: uuid,
+                            id: result.insertId,
+                            is_delivered: 1,
+                            status: 'delivered',
+                            timestamp: messagePayload.created_at
+                        });
+                    } else {
+                        // المستخدم متصل ولكن ليس في نفس المحادثة
+                        console.log(`📱 User ${receiver_id} is online but not in conversation - sending full notification`);
+
+                        // تحديث حالة التسليم
+                        await db.execute(
+                            `UPDATE messages SET is_delivered = 1 WHERE id = ?`,
+                            [result.insertId]
+                        );
+
+                        messagePayload.is_delivered = 1;
+
+                        // إرسال الرسالة
+                        io.to(`user_${receiver_id}`).emit('receive_message', messagePayload);
+
+                        socket.emit('message_sent', {
+                            uuid: uuid,
+                            id: result.insertId,
+                            is_delivered: 1,
+                            status: 'delivered',
+                            timestamp: messagePayload.created_at
+                        });
+
+                        // إرسال إشعار كامل بالتفاصيل
+                        await sendNotificationToSpring(
+                            sender_id,
+                            receiver_id,
+                            result.insertId,
+                            uuid,
+                            content,
+                            timestamp.toISOString()
+                        );
+                    }
                 } else {
-                    // المستقبل غير متصل
+                    // المستقبل غير متصل - نرسل إشعار
+                    console.log(`📱 User ${receiver_id} is offline - sending full notification`);
+
                     socket.emit('message_sent', {
                         uuid: uuid,
                         id: result.insertId,
@@ -186,19 +324,18 @@ module.exports = (io) => {
                         note: "User is offline"
                     });
 
-                    // التحقق من عدم وجود رسائل غير مقروءة حديثة لنفس المستقبل
-                    const recentUnread = await hasRecentUnreadMessages(receiver_id);
-
-                    if (!recentUnread) {
-                        try { // 🔴 🔴 🔴 أضف try/catch هنا
-                            await sendNotificationToSpring(
-                                sender_id, receiver_id, content, token);
-                        } catch (notifyError) {
-                            console.error("❌ Failed to send notification (but message saved):", notifyError.message);
-                            // لا تقم بإعادة رمي الخطأ - فقط سجله واستمر
-                        }
-                    } else {
-                        console.log(`⏳ Skipping notification for user ${receiver_id}: recent unread messages exist`);
+                    // إرسال إشعار كامل بالتفاصيل
+                    try {
+                        await sendNotificationToSpring(
+                            sender_id,
+                            receiver_id,
+                            result.insertId,
+                            uuid,
+                            content,
+                            timestamp.toISOString()
+                        );
+                    } catch (notifyError) {
+                        console.error("❌ Failed to send notification (but message saved):", notifyError.message);
                     }
                 }
 
@@ -213,6 +350,9 @@ module.exports = (io) => {
 
         socket.on('disconnect', () => {
             console.log(`User Disconnected: ${userId}`);
+            // تنظيف البيانات
+            socket.activeConversations.clear();
+            socket.currentConversationWith = null;
         });
     });
 };
