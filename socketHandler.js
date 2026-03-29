@@ -114,10 +114,11 @@ module.exports = (io) => {
         const getPartnerInfo = async (partnerId) => {
             try {
                 const [rows] = await db.execute(
-                    `SELECT id, firstname, lastname, imagePath FROM users WHERE id = ?`,
+                    `SELECT id, firstname, lastname, imagePath 
+                        FROM antelaka._user 
+                        WHERE id = ?`,
                     [partnerId]
                 );
-
                 if (rows.length > 0) {
                     return {
                         id: rows[0].id,
