@@ -162,16 +162,16 @@ module.exports = (io) => {
                 const notificationPayload = {
                     id: messageId,
                     uuid: uuid,
-                    sender_id: senderId,
-                    receiver_id: receiverId,
-                    content: content,
-                    is_read: 0,
-                    created_at: createdAt,
-                    is_delivered: 0,
-                    unread_count: unreadCount,
-                    partner_id: senderId,
+                    senderId: senderId,
+                    receiverId: receiverId,
+                    text: content,          // 🔥 بدل content
+                    isRead: 0,
+                    createdAt: createdAt,
+                    isDelivered: 0,
+                    unreadCount: unreadCount,
+                    partnerId: senderId,
                     isMine: false,
-                    partner_info: partnerInfo
+                    partnerInfo: partnerInfo
                 };
 
                 console.log("📦 Payload being sent:", JSON.stringify(notificationPayload, null, 2));
