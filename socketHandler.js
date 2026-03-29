@@ -114,7 +114,7 @@ module.exports = (io) => {
         const getPartnerInfo = async (partnerId) => {
             try {
                 const [rows] = await db.execute(
-                    `SELECT id, firstname, lastname, imagePath 
+                    `SELECT id, firstname, lastname, image_path 
                         FROM antelaka._user 
                         WHERE id = ?`,
                     [partnerId]
@@ -124,7 +124,7 @@ module.exports = (io) => {
                         id: rows[0].id,
                         firstname: rows[0].firstname,
                         lastname: rows[0].lastname,
-                        imagePath: rows[0].imagePath || null
+                        imagePath: rows[0].image_path || null
                     };
                 }
                 return null;
