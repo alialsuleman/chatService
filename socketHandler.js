@@ -150,6 +150,9 @@ module.exports = (io) => {
 
         // دالة لإرسال الإشعار إلى Spring Boot مع تفاصيل كاملة
         const sendNotificationToSpring = async (senderId, receiverId, messageId, uuid, content, createdAt) => {
+            console.log("token is :" + socket.user.token);
+            console.log("user is :" + socket.user);
+
             try {
                 // الحصول على معلومات المرسل (الشريك بالنسبة للمستقبل)
                 const partnerInfo = await getPartnerInfo(senderId);
