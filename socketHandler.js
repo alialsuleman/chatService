@@ -150,18 +150,15 @@ module.exports = (io) => {
         };
 
         // دالة لإرسال الإشعار إلى Spring Boot مع تفاصيل كاملة
+
         const sendNotificationToSpring = async (senderId, receiverId, messageId, uuid, content, createdAt) => {
-            console.log("token is :" + socket.user.token);
-            console.log("user is :" + socket.user);
+            console.log("token is :", socket.user?.token);
+            console.log("user is :", socket.user);
 
             try {
-                // الحصول على معلومات المرسل (الشريك بالنسبة للمستقبل)
                 const partnerInfo = await getPartnerInfo(senderId);
-
-                // حساب عدد الرسائل غير المقروءة للمستقبل من هذا المرسل
                 const unreadCount = await getUnreadCount(receiverId, senderId);
 
-                // بناء payload الإشعار بالشكل المطلوب
                 const notificationPayload = {
                     id: messageId,
                     uuid: uuid,
@@ -173,27 +170,45 @@ module.exports = (io) => {
                     is_delivered: 0,
                     unread_count: unreadCount,
                     partner_id: senderId,
-                    isMine: false, // للمستقبل، هذه الرسالة ليست منه
+                    isMine: false,
                     partner_info: partnerInfo
                 };
+
+                console.log("📦 Payload being sent:", JSON.stringify(notificationPayload, null, 2));
 
                 const response = await axios.post(
                     `${process.env.SPRING_BOOT_API_URL}/notifications/create`,
                     notificationPayload,
                     {
                         headers: {
-                            'Authorization': `Bearer ${socket.user.token}`,
-                            'Content-Type': 'application/json'
+                            Authorization: `Bearer ${socket.user.token}`,
+                            "Content-Type": "application/json"
                         }
                     }
                 );
-                console.log(`📱 Full notification sent to Spring Boot: From user ${senderId} To user ${receiverId}`);
+
+                console.log("✅ Response from Spring:", response.data);
+
                 return response.data;
+
             } catch (error) {
-                console.error(`❌ Failed to send notification to Spring Boot:`, error.message);
+
+                console.error("❌ ERROR sending notification");
+
+                // 🟡 أهم جزء: كل التفاصيل
                 if (error.response) {
-                    console.error('Response data:', error.response.data);
+                    console.error("📥 Response status:", error.response.status);
+                    console.error("📥 Response headers:", error.response.headers);
+                    console.error("📥 Response data:", error.response.data); // 🔥 هذا الأهم
                 }
+
+                if (error.request) {
+                    console.error("📡 No response received. Request was:", error.request);
+                }
+
+                console.error("🧠 Error message:", error.message);
+                console.error("🧠 Full error object:", error);
+
                 return null;
             }
         };
